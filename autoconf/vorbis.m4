@@ -27,26 +27,9 @@ AC_ARG_ENABLE(vorbistest,
 			     [Do not try to compile and run a test Vorbis program]),
 	      , [enable_vorbistest=yes])
 
-  if test "x$vorbis_libraries" != "x" ; then
-    VORBIS_LIBS="-L$vorbis_libraries"
-  elif test "x$vorbis_prefix" != "x" ; then
-    VORBIS_LIBS="-L$vorbis_prefix/lib"
-  elif test "x$prefix" != "xNONE"; then
-    VORBIS_LIBS="-L$prefix/lib"
-  fi
-
   VORBIS_LIBS="$VORBIS_LIBS -lvorbis -lm"
   VORBISFILE_LIBS="-lvorbisfile"
   VORBISENC_LIBS="-lvorbisenc"
-
-  if test "x$vorbis_includes" != "x" ; then
-    VORBIS_CFLAGS="-I$vorbis_includes"
-  elif test "x$vorbis_prefix" != "x" ; then
-    VORBIS_CFLAGS="-I$vorbis_prefix/include"
-  elif test "x$prefix" != "xNONE"; then
-    VORBIS_CFLAGS="-I$prefix/include"
-  fi
-
 
   AC_MSG_CHECKING(for Vorbis)
   no_vorbis=""

@@ -25,23 +25,7 @@ AC_ARG_ENABLE(libOggFLACtest,
 	      		     [Do not try to compile and run a test libOggFLAC program]),,
 	      [enable_libOggFLACtest=yes])
 
-  if test "x$libOggFLAC_libraries" != "x" ; then
-    LIBOGGFLAC_LIBS="-L$libOggFLAC_libraries"
-  elif test "x$libOggFLAC_prefix" != "x" ; then
-    LIBOGGFLAC_LIBS="-L$libOggFLAC_prefix/lib"
-  elif test "x$prefix" != "xNONE" ; then
-    LIBOGGFLAC_LIBS="-L$prefix/lib"
-  fi
-
   LIBOGGFLAC_LIBS="$LIBOGGFLAC_LIBS -lOggFLAC -lFLAC -lm"
-
-  if test "x$libOggFLAC_includes" != "x" ; then
-    LIBOGGFLAC_CFLAGS="-I$libOggFLAC_includes"
-  elif test "x$libOggFLAC_prefix" != "x" ; then
-    LIBOGGFLAC_CFLAGS="-I$libOggFLAC_prefix/include"
-  elif test "$prefix" != "xNONE"; then
-    LIBOGGFLAC_CFLAGS="-I$prefix/include"
-  fi
 
   AC_MSG_CHECKING(for libOggFLAC)
   no_libOggFLAC=""

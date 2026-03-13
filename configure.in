@@ -91,21 +91,6 @@ else
   x_config_flag=yes
 fi
 
-# Checking gcc environment
-for i in `echo $LIBRARY_PATH|sed -e 's,:, ,g'`; do
-  LDFLAGS="$LDFLAGS -L${i}"
-done
-for i in `echo $C_INCLUDE_PATH|sed -e 's,:, ,g'`; do
-  CPPFLAGS="$CPPFLAGS -I${i}"
-done
-
-# add $prefix if specified.
-if test "x$prefix" != xNONE -a "x$prefix" != "x$ac_default_prefix" -a "x$prefix" != "x/usr"; then
-  LDFLAGS="-L$prefix/lib $LDFLAGS"
-  SHLDFLAGS="-L$prefix/lib $SHLDFLAGS"
-  CPPFLAGS="-I$prefix/include $CPPFLAGS"
-fi
-
 dnl add --with-includes, --with-libraries
 AC_ARG_WITH(includes,
   AS_HELP_STRING([--with-includes=DIR], [Specify include directories (colon separated)]),

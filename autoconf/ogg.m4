@@ -26,23 +26,7 @@ AC_ARG_ENABLE(oggtest,
 	      		     [Do not try to compile and run a test Ogg program]),,
 	      [enable_oggtest=yes])
 
-  if test "x$ogg_libraries" != "x" ; then
-    OGG_LIBS="-L$ogg_libraries"
-  elif test "x$ogg_prefix" != "x" ; then
-    OGG_LIBS="-L$ogg_prefix/lib"
-  elif test "x$prefix" != "xNONE" ; then
-    OGG_LIBS="-L$prefix/lib"
-  fi
-
   OGG_LIBS="$OGG_LIBS -logg"
-
-  if test "x$ogg_includes" != "x" ; then
-    OGG_CFLAGS="-I$ogg_includes"
-  elif test "x$ogg_prefix" != "x" ; then
-    OGG_CFLAGS="-I$ogg_prefix/include"
-  elif test "x$prefix" != "xNONE"; then
-    OGG_CFLAGS="-I$prefix/include"
-  fi
 
   AC_MSG_CHECKING(for Ogg)
   no_ogg=""

@@ -62,7 +62,7 @@ yes) i_dlfcn=define;;
 *)   i_dlfcn=undef;;
 esac
 cat > dyna.c <<EOM
-int fred () { }
+int fred (void) { }
 EOM
 
 cat > fred.c <<EOM
@@ -77,7 +77,7 @@ cat > fred.c <<EOM
 #include <link.h>
 #endif
 
-extern int fred() ;
+extern int fred(void) ;
 
 int main()
 {

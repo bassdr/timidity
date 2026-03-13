@@ -417,7 +417,7 @@ calcnewt$(EXEEXT): $(calcnewt_OBJECTS) $(calcnewt_DEPENDENCIES)
 	$(LINK) $(calcnewt_LDFLAGS) $(calcnewt_OBJECTS) $(calcnewt_LDADD) $(LIBS)
 timidity$(EXEEXT): $(timidity_OBJECTS) $(timidity_DEPENDENCIES) 
 	@rm -f timidity$(EXEEXT)
-	ar -cru timidity.exe $(timidity_LDFLAGS) $(timidity_OBJECTS) $(timidity_LDADD) 
+	$(AR) -cru timidity.exe $(timidity_LDFLAGS) $(timidity_OBJECTS) $(timidity_LDADD) 
 else
 calcnewt$(EXEEXT): $(calcnewt_OBJECTS) $(calcnewt_DEPENDENCIES) 
 	@rm -f calcnewt$(EXEEXT)

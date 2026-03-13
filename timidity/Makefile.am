@@ -480,3 +480,6 @@ $(top_builddir)/utils/libutils.a:
 
 objs: $(timidity_OBJECTS) $(timidity_DEPENDENCIES)
 	@:
+
+# Prevent .symver mixup with buggy alsa headers (global asm vs. LTO partitions)
+alsa_a.$(OBJEXT): CFLAGS += -fno-lto

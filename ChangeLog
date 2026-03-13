@@ -1,3 +1,8 @@
+2026-03-13  David Racine <bass_dr@hotmail.com>
+        * Implement a pipewire output
+        * Implement a pipewiresyn midi input
+        * Bump version to 2.16.0
+
 2018-08-29  TAMUKI Shoichi <tamuki@linet.gr.jp>
 
 	* timidity/readmidi.c: Fix for CVE-2017-11546

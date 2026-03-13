@@ -1,6 +1,9 @@
 *.a
 *.o
+*.lo
+*.la
 .deps/
+.libs/
 Makefile
 Makefile.in
 /aclocal.m4
@@ -10,7 +13,16 @@ Makefile.in
 /autom4te.cache/
 /config.*
 /configure
+/libtool
 /stamp-h?
 
+/common.makefile
 /interface.h
+/doc/timidity.1
+/doc/timidity.cfg.5
+/timidity/calcnewt
 /timidity/newton_table.c
+/timidity/timidity
+
+*~
+*.swp

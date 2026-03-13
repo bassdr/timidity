@@ -4235,9 +4235,9 @@ static int parse_opt_h(const char *arg)
 "  `l'          loop playing (some interface ignore this option)" NLS
 "  `r'          randomize file list arguments before playing" NLS
 "  `s'          sorting file list arguments before playing" NLS, fp);
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 	fputs("  `D'          daemonize TiMidity++ in background "
-			"(for alsaseq only)" NLS, fp);
+			"(for alsaseq/pipewiresyn)" NLS, fp);
 #endif
 	fputs(NLS, fp);
 	fputs("Alternative interface long options:" NLS
@@ -4247,7 +4247,7 @@ static int parse_opt_h(const char *arg)
 "  --[no-]loop" NLS
 "  --[no-]random" NLS
 "  --[no-]sort" NLS, fp);
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 	fputs("  --[no-]background" NLS, fp);
 #endif
 	fputs(NLS, fp);
@@ -5581,11 +5581,12 @@ MAIN_INTERFACE int timidity_post_load_configuration(void)
 {
     int i, cmderr = 0;
 
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
     /* If we're going to fork for daemon mode, we need to fork now, as
        certain output libraries (pulseaudio) become unhappy if initialized
        before forking and then being used from the child. */
-    if (ctl->id_character == 'A' && (ctl->flags & CTLF_DAEMONIZE))
+    if ((ctl->id_character == 'A' || ctl->id_character == 'p') &&
+        (ctl->flags & CTLF_DAEMONIZE))
     {
 	int pid = fork();
 	FILE *pidf;

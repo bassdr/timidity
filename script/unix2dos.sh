@@ -2,7 +2,7 @@
 bar="AUTHORS Makefile.am COPYING Makefile.in NEWS interface.h.in ChangeLog 
     README common.makefile.in ChangeLog.1  README.ja config.h.in ChangeLog.2 
     TODO INSTALL TiMidity-uj.ad configure INSTALL.ja TiMidity.ad 
-    configure.in "
+    configure.ac "
 bar="$bar `ls libarc/*|grep libarc/` `ls libunimod/*|grep libunimod/`  `ls utils/*|grep utils/`
   `ls timidity/*|grep timidity/` `ls windrv/*|grep windrv/` `ls interface/*|grep interface/`
   `ls doc/* doc/*/* doc/*/*/*|grep doc` "

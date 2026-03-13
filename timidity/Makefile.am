@@ -127,6 +127,7 @@ EXTRA_timidity_SOURCES = \
 	hpux_a.c \
 	hpux_d_a.c \
 	jack_a.c \
+	pipewire_a.c \
 	oss_a.c \
 	mac_a.c \
 	mac_qt_a.c \

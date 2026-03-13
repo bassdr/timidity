@@ -864,9 +864,10 @@ dnl flac(F):    FLAC / OggFLAC
 dnl speex(S):   Ogg Speex
 dnl gogo(g):    MP3 GOGO
 dnl jack(j):    JACK
+dnl pipewire(P): PipeWire
 dnl ao(O):      Libao
 
-audio_targets='default oss alsa sun hpux irix mme sb_dsp w32 alib nas arts esd vorbis flac gogo portaudio npipe jack ao'
+audio_targets='default oss alsa sun hpux irix mme sb_dsp w32 alib nas arts esd vorbis flac gogo portaudio npipe jack pipewire ao'
 
 AC_ARG_WITH(nas-library,
   AS_HELP_STRING([--with-nas-library=library], [NAS absolute library path(Don't use -laudio)]))
@@ -893,6 +894,7 @@ AC_ARG_ENABLE(audio,
                               portaudio: PortAudio
                               npipe:     Named Pipe(windows)
                               jack:      JACK
+                              pipewire:  PipeWire
                               ao:        Libao
                               vorbis:    Ogg Vorbis
                               flac:      FLAC / OggFLAC
@@ -920,7 +922,7 @@ AC_ARG_WITH(default-output,
   [Specify default output mode (optional):
                                 (default|alsa|alib|arts|nas|
                                 esd|wav|au|aiff|list|vorbis|flac|speex|
-                                gogo|portaudio|npipe|jack|ao)]),
+                                gogo|portaudio|npipe|jack|pipewire|ao)]),
   [ if test "$enable_audio" != no; then
     DEFAULT_PLAYMODE=$withval
     eval "au_enable_$DEFAULT_PLAYMODE=yes"
@@ -1344,6 +1346,17 @@ else
   AC_MSG_RESULT(no)
 fi
 
+dnl PipeWire
+AC_MSG_CHECKING(enable_audio=pipewire)
+if test "x$au_enable_pipewire" = xyes; then
+  AC_MSG_RESULT(yes)
+  SYSEXTRAS="$SYSEXTRAS pipewire_a.c"
+  EXTRALIBS="$EXTRALIBS $(${PKG_CONFIG} --libs libpipewire-0.3)"
+  EXTRADEFS="$EXTRADEFS -DAU_PIPEWIRE $(${PKG_CONFIG} --cflags libpipewire-0.3)"
+else
+  AC_MSG_RESULT(no)
+fi
+
 dnl AO
 AC_MSG_CHECKING(enable_audio=ao)
 if test "x$au_enable_ao" = xyes; then
@@ -1516,6 +1529,7 @@ case ".$DEFAULT_PLAYMODE" in
   .speex)    TIMIDITY_OUTPUT_ID=S ;;
   .gogo)     TIMIDITY_OUTPUT_ID=g ;;
   .jack)     TIMIDITY_OUTPUT_ID=j ;;
+  .pipewire) TIMIDITY_OUTPUT_ID=W ;;
   .ao)       TIMIDITY_OUTPUT_ID=O ;;
   *)         TIMIDITY_OUTPUT_ID= ;;
 esac

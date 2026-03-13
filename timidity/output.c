@@ -106,7 +106,11 @@ extern PlayMode npipe_play_mode;
 
 #ifdef AU_JACK
 extern PlayMode jack_play_mode;
-#endif /* AU_NAS */
+#endif /* AU_JACK */
+
+#ifdef AU_PIPEWIRE
+extern PlayMode pipewire_play_mode;
+#endif /* AU_PIPEWIRE */
 
 #ifdef AU_NAS
 extern PlayMode nas_play_mode;
@@ -138,6 +142,10 @@ extern PlayMode midi_play_mode;
 extern PlayMode modmidi_play_mode;
 
 PlayMode *play_mode_list[] = {
+#if defined(AU_PIPEWIRE)
+  &pipewire_play_mode,
+#endif /* AU_PIPEWIRE */
+
 #if defined(AU_AO) /* Try libao first as that will give us pulseaudio */
   &ao_play_mode,
 #endif /* AU_AO */

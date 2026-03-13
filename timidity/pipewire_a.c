@@ -159,6 +159,12 @@ static int ringbuf_write(struct ringbuf *rb, const char *src, int bytes)
 
 
 /*
+ * Idle timeout: cork the stream after this many seconds of silence,
+ * so the device is released and doesn't show up in pavucontrol.
+ */
+#define IDLE_TIMEOUT_SEC 3
+
+/*
  * PipeWire context
  */
 struct pw_ctx {
@@ -174,6 +180,9 @@ struct pw_ctx {
 	pthread_cond_t cond;
 	int running;
 	int draining;
+	int corked;		/* stream is corked (idle) */
+	int idle_frames;	/* consecutive empty frames from process cb */
+	int idle_threshold;	/* frames of silence before corking */
 
 	struct ringbuf rb;
 	long samples_played;	/* frames consumed by PipeWire */
@@ -217,13 +226,26 @@ static void on_process(void *userdata)
 	if (avail >= n_bytes) {
 		ringbuf_read(&c->rb, dst, n_bytes);
 		c->samples_played += n_frames;
+		c->idle_frames = 0;
 	} else if (avail > 0) {
 		/* partial: read what we have, zero the rest */
 		int got = ringbuf_read(&c->rb, dst, avail);
 		memset(dst + got, 0, n_bytes - got);
 		c->samples_played += avail / stride;
+		c->idle_frames = 0;
 	} else {
 		memset(dst, 0, n_bytes);
+		c->idle_frames += n_frames;
+		if (!c->corked && c->idle_frames >= c->idle_threshold) {
+			c->corked = 1;
+			pthread_mutex_unlock(&c->lock);
+			buf->datas[0].chunk->offset = 0;
+			buf->datas[0].chunk->stride = stride;
+			buf->datas[0].chunk->size = n_bytes;
+			pw_stream_queue_buffer(c->stream, pwbuf);
+			pw_stream_set_active(c->stream, 0);
+			return;
+		}
 	}
 
 	/* wake up the writer thread */
@@ -355,6 +377,9 @@ static int open_output(void)
 	}
 
 	ctx.running = 1;
+	ctx.corked = 0;
+	ctx.idle_frames = 0;
+	ctx.idle_threshold = dpm.rate * IDLE_TIMEOUT_SEC;
 	dpm.fd = 0; /* mark as open */
 	return ret_val;
 }
@@ -364,7 +389,22 @@ static void close_output(void)
 	if (!ctx.loop)
 		return;
 
+	/*
+	 * Signal the writer thread to stop, then wake it in case it's
+	 * blocked in pthread_cond_wait inside output_data().
+	 * This must happen before pw_thread_loop_stop() which joins the
+	 * PipeWire thread — otherwise we can deadlock if on_process holds
+	 * ctx.lock while output_data is waiting on ctx.cond.
+	 */
+	pthread_mutex_lock(&ctx.lock);
 	ctx.running = 0;
+	pthread_cond_signal(&ctx.cond);
+	pthread_mutex_unlock(&ctx.lock);
+
+	/* Disconnect the stream first — stops process callbacks */
+	pw_thread_loop_lock(ctx.loop);
+	pw_stream_disconnect(ctx.stream);
+	pw_thread_loop_unlock(ctx.loop);
 
 	pw_thread_loop_stop(ctx.loop);
 	pw_stream_destroy(ctx.stream);
@@ -383,6 +423,17 @@ static void close_output(void)
 static int output_data(char *buf, int32 bytes)
 {
 	int written;
+
+	/* uncork the stream if it was idle-suspended */
+	if (ctx.corked) {
+		pw_thread_loop_lock(ctx.loop);
+		pw_stream_set_active(ctx.stream, 1);
+		pw_thread_loop_unlock(ctx.loop);
+		pthread_mutex_lock(&ctx.lock);
+		ctx.corked = 0;
+		ctx.idle_frames = 0;
+		pthread_mutex_unlock(&ctx.lock);
+	}
 
 	while (bytes > 0) {
 		pthread_mutex_lock(&ctx.lock);

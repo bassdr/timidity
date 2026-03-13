@@ -228,6 +228,26 @@ static void ctl_close(void)
 {
 	if (!ctl.opened)
 		return;
+
+	pwctx.running = 0;
+
+	if (pwctx.filter) {
+		pw_thread_loop_lock(pwctx.loop);
+		pw_filter_disconnect(pwctx.filter);
+		pw_thread_loop_unlock(pwctx.loop);
+	}
+
+	if (pwctx.loop) {
+		pw_thread_loop_stop(pwctx.loop);
+		if (pwctx.filter)
+			pw_filter_destroy(pwctx.filter);
+		pw_thread_loop_destroy(pwctx.loop);
+		pwctx.filter = NULL;
+		pwctx.loop = NULL;
+	}
+
+	pw_deinit();
+	ctl.opened = 0;
 }
 
 static int ctl_read(int32 *valp)

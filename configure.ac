@@ -1540,7 +1540,7 @@ AC_MSG_RESULT($DEFAULT_PLAYMODE/$TIMIDITY_OUTPUT_ID)
 # Interface Section
 #
 
-interface_targets='dynamic ncurses slang motif tcltk emacs vt100 xaw xskin gtk alsaseq winsyn winsyng portmidisyng npsyn'
+interface_targets='dynamic ncurses slang motif tcltk emacs vt100 xaw xskin gtk alsaseq pipewiresyn winsyn winsyng portmidisyng npsyn'
 
 AC_ARG_ENABLE(interface,
   AS_HELP_STRING([--enable-interface=[interface_list]], [Comma separated interface list]),
@@ -1953,6 +1953,18 @@ CONFIG_INTERFACE(alsaseq,ALSASEQ,A,
   [ AM_PATH_ALSA
   ],
   [ MY_DEFINE(IA_ALSASEQ)
+  ])
+
+dnl TiMidity PipeWire synthesizer server
+AM_CONDITIONAL(ENABLE_PIPEWIRESYN, false)
+CONFIG_INTERFACE(pipewiresyn,PIPEWIRESYN,p,
+  AS_HELP_STRING([--enable-pipewiresyn], [Enable PipeWire Synthesizer interface
+                                                          (default is no)]),
+  [ INTERFACE_SRCS="$INTERFACE_SRCS pipewire_c.c"
+    EXTRALIBS="$EXTRALIBS $(${PKG_CONFIG} --libs libpipewire-0.3)"
+    EXTRADEFS="$EXTRADEFS $(${PKG_CONFIG} --cflags libpipewire-0.3)"
+  ],
+  [ MY_DEFINE(IA_PIPEWIRESYN)
   ])
 
 dnl TiMidity Windows synthesizer server

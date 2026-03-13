@@ -1,0 +1,461 @@
+/*
+    TiMidity++ -- MIDI to WAVE converter and player
+    Copyright (C) 1999-2002 Masanao Izumo <mo@goice.co.jp>
+    Copyright (C) 1995 Tuukka Toivonen <tt@cgs.fi>
+
+    pipewire_a.c - Copyright (C) 2026
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+    pipewire_a.c
+
+    Functions to play sound through PipeWire.
+
+    Like JACK, PipeWire uses a "pull" model which doesn't match TiMidity's
+    "push" model. We use an intermediate ring buffer (same approach as
+    jack_a.c) to bridge the two. Unlike the JACK driver, we send S16 PCM
+    directly to PipeWire (which handles format conversion server-side),
+    avoiding the S16-to-float conversion overhead.
+*/
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif /* HAVE_CONFIG_H */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+
+#include <pipewire/pipewire.h>
+#include <spa/param/audio/format-utils.h>
+
+#include "timidity.h"
+#include "common.h"
+#include "output.h"
+#include "controls.h"
+#include "instrum.h"
+#include "playmidi.h"
+#include "miditrace.h"
+
+static int open_output(void);
+static void close_output(void);
+static int output_data(char *buf, int32 bytes);
+static int acntl(int request, void *arg);
+static int detect(void);
+
+#define dpm pipewire_play_mode
+
+PlayMode dpm = {
+	DEFAULT_RATE,
+	PE_16BIT | PE_SIGNED,
+	PF_PCM_STREAM | PF_CAN_TRACE | PF_BUFF_FRAGM_OPT,
+	-1,
+	{0},
+	"PipeWire", 'W',
+	NULL,
+	open_output,
+	close_output,
+	output_data,
+	acntl,
+	detect
+};
+
+/*
+ * Ring buffer for bridging push (TiMidity) and pull (PipeWire) models.
+ * Stores raw S16 interleaved PCM data.
+ */
+
+struct ringbuf {
+	char *buf;
+	int size;		/* total size in bytes */
+	long rdptr, wrptr;	/* byte offsets (unbounded) */
+};
+
+static void ringbuf_init(struct ringbuf *rb, int size)
+{
+	rb->buf = (char *)safe_malloc(size);
+	rb->size = size;
+	rb->rdptr = rb->wrptr = 0;
+}
+
+static void ringbuf_destroy(struct ringbuf *rb)
+{
+	free(rb->buf);
+	rb->buf = NULL;
+	rb->rdptr = rb->wrptr = 0;
+}
+
+static inline int ringbuf_available(struct ringbuf *rb)
+{
+	return rb->wrptr - rb->rdptr;
+}
+
+static inline int ringbuf_empty(struct ringbuf *rb)
+{
+	return rb->size - ringbuf_available(rb);
+}
+
+static inline void ringbuf_clear(struct ringbuf *rb)
+{
+	rb->rdptr = rb->wrptr = 0;
+}
+
+/* Read up to 'bytes' from ring buffer into dst. Returns bytes read. */
+static int ringbuf_read(struct ringbuf *rb, char *dst, int bytes)
+{
+	int avail = ringbuf_available(rb);
+	int off, chunk;
+
+	if (bytes > avail)
+		bytes = avail;
+	if (bytes <= 0)
+		return 0;
+
+	off = rb->rdptr % rb->size;
+	chunk = rb->size - off;
+	if (chunk > bytes)
+		chunk = bytes;
+	memcpy(dst, rb->buf + off, chunk);
+	if (chunk < bytes)
+		memcpy(dst + chunk, rb->buf, bytes - chunk);
+	rb->rdptr += bytes;
+	return bytes;
+}
+
+/* Write up to 'bytes' into ring buffer from src. Returns bytes written. */
+static int ringbuf_write(struct ringbuf *rb, const char *src, int bytes)
+{
+	int space = ringbuf_empty(rb);
+	int off, chunk;
+
+	if (bytes > space)
+		bytes = space;
+	if (bytes <= 0)
+		return 0;
+
+	off = rb->wrptr % rb->size;
+	chunk = rb->size - off;
+	if (chunk > bytes)
+		chunk = bytes;
+	memcpy(rb->buf + off, src, chunk);
+	if (chunk < bytes)
+		memcpy(rb->buf, src + chunk, bytes - chunk);
+	rb->wrptr += bytes;
+	return bytes;
+}
+
+
+/*
+ * PipeWire context
+ */
+struct pw_ctx {
+	struct pw_thread_loop *loop;
+	struct pw_stream *stream;
+
+	int channels;
+	int sample_size;	/* bytes per frame (channels * sizeof(int16_t)) */
+	int frag_size;		/* fragment size in frames */
+	int frags;		/* number of fragments */
+
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+	int running;
+	int draining;
+
+	struct ringbuf rb;
+	long samples_played;	/* frames consumed by PipeWire */
+};
+
+static struct pw_ctx ctx;
+
+
+/*
+ * PipeWire process callback - called when PipeWire needs audio data.
+ * Runs on the PipeWire realtime thread.
+ */
+static void on_process(void *userdata)
+{
+	struct pw_ctx *c = (struct pw_ctx *)userdata;
+	struct pw_buffer *pwbuf;
+	struct spa_buffer *buf;
+	char *dst;
+	int n_bytes, n_frames, stride;
+	int avail;
+
+	pwbuf = pw_stream_dequeue_buffer(c->stream);
+	if (!pwbuf)
+		return;
+
+	buf = pwbuf->buffer;
+	dst = buf->datas[0].data;
+	if (!dst)
+		goto done;
+
+	stride = c->sample_size;
+	n_frames = buf->datas[0].maxsize / stride;
+	if (pwbuf->requested && (uint64_t)n_frames > pwbuf->requested)
+		n_frames = pwbuf->requested;
+
+	n_bytes = n_frames * stride;
+
+	pthread_mutex_lock(&c->lock);
+	avail = ringbuf_available(&c->rb);
+
+	if (avail >= n_bytes) {
+		ringbuf_read(&c->rb, dst, n_bytes);
+		c->samples_played += n_frames;
+	} else if (avail > 0) {
+		/* partial: read what we have, zero the rest */
+		int got = ringbuf_read(&c->rb, dst, avail);
+		memset(dst + got, 0, n_bytes - got);
+		c->samples_played += avail / stride;
+	} else {
+		memset(dst, 0, n_bytes);
+	}
+
+	/* wake up the writer thread */
+	pthread_cond_signal(&c->cond);
+	pthread_mutex_unlock(&c->lock);
+
+	buf->datas[0].chunk->offset = 0;
+	buf->datas[0].chunk->stride = stride;
+	buf->datas[0].chunk->size = n_bytes;
+
+done:
+	pw_stream_queue_buffer(c->stream, pwbuf);
+}
+
+static const struct pw_stream_events stream_events = {
+	PW_VERSION_STREAM_EVENTS,
+	.process = on_process,
+};
+
+
+static int detect(void)
+{
+	/* Try to initialize PipeWire; if it works, we're available */
+	pw_init(NULL, NULL);
+	pw_deinit();
+	return 1;
+}
+
+static int open_output(void)
+{
+	const struct spa_pod *params[1];
+	uint8_t pod_buffer[1024];
+	struct spa_pod_builder b;
+	enum spa_audio_format spa_fmt;
+	int ret_val = 0;
+
+	memset(&ctx, 0, sizeof(ctx));
+
+	pw_init(NULL, NULL);
+
+	/* encoding setup */
+	dpm.encoding &= ~(PE_ULAW | PE_ALAW | PE_BYTESWAP);
+	if (dpm.encoding & PE_MONO)
+		ctx.channels = 1;
+	else
+		ctx.channels = 2;
+
+	if (dpm.encoding & PE_24BIT) {
+		spa_fmt = SPA_AUDIO_FORMAT_S24_LE;
+		dpm.encoding |= PE_SIGNED;
+		ctx.sample_size = 3 * ctx.channels;
+	} else if (dpm.encoding & PE_16BIT) {
+		spa_fmt = SPA_AUDIO_FORMAT_S16_LE;
+		dpm.encoding |= PE_SIGNED;
+		ctx.sample_size = 2 * ctx.channels;
+	} else {
+		spa_fmt = SPA_AUDIO_FORMAT_U8;
+		dpm.encoding &= ~PE_SIGNED;
+		ctx.sample_size = ctx.channels;
+	}
+
+	/* buffer sizing */
+	if (dpm.extra_param[1] != 0)
+		ctx.frag_size = dpm.extra_param[1];
+	else
+		ctx.frag_size = audio_buffer_size;
+	if (dpm.extra_param[0] == 0)
+		ctx.frags = 4;
+	else
+		ctx.frags = dpm.extra_param[0];
+
+	pthread_mutex_init(&ctx.lock, NULL);
+	pthread_cond_init(&ctx.cond, NULL);
+	ringbuf_init(&ctx.rb, ctx.frag_size * ctx.frags * ctx.sample_size);
+
+	/* create threaded loop */
+	ctx.loop = pw_thread_loop_new("timidity-pw", NULL);
+	if (!ctx.loop) {
+		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+			  "PipeWire: cannot create thread loop");
+		return -1;
+	}
+
+	/* create stream */
+	ctx.stream = pw_stream_new_simple(
+		pw_thread_loop_get_loop(ctx.loop),
+		"TiMidity++",
+		pw_properties_new(
+			PW_KEY_MEDIA_TYPE, "Audio",
+			PW_KEY_MEDIA_CATEGORY, "Playback",
+			PW_KEY_MEDIA_ROLE, "Music",
+			NULL),
+		&stream_events, &ctx);
+	if (!ctx.stream) {
+		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+			  "PipeWire: cannot create stream");
+		pw_thread_loop_destroy(ctx.loop);
+		return -1;
+	}
+
+	/* build format params */
+	b = SPA_POD_BUILDER_INIT(pod_buffer, sizeof(pod_buffer));
+	params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
+		&SPA_AUDIO_INFO_RAW_INIT(
+			.format = spa_fmt,
+			.channels = ctx.channels,
+			.rate = dpm.rate));
+
+	/* connect stream */
+	if (pw_stream_connect(ctx.stream,
+			PW_DIRECTION_OUTPUT, PW_ID_ANY,
+			PW_STREAM_FLAG_AUTOCONNECT |
+			PW_STREAM_FLAG_MAP_BUFFERS,
+			params, 1) < 0) {
+		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+			  "PipeWire: cannot connect stream");
+		pw_stream_destroy(ctx.stream);
+		pw_thread_loop_destroy(ctx.loop);
+		return -1;
+	}
+
+	/* start the loop */
+	if (pw_thread_loop_start(ctx.loop) < 0) {
+		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+			  "PipeWire: cannot start thread loop");
+		pw_stream_destroy(ctx.stream);
+		pw_thread_loop_destroy(ctx.loop);
+		return -1;
+	}
+
+	ctx.running = 1;
+	dpm.fd = 0; /* mark as open */
+	return ret_val;
+}
+
+static void close_output(void)
+{
+	if (!ctx.loop)
+		return;
+
+	ctx.running = 0;
+
+	pw_thread_loop_stop(ctx.loop);
+	pw_stream_destroy(ctx.stream);
+	ctx.stream = NULL;
+	pw_thread_loop_destroy(ctx.loop);
+	ctx.loop = NULL;
+
+	ringbuf_destroy(&ctx.rb);
+	pthread_mutex_destroy(&ctx.lock);
+	pthread_cond_destroy(&ctx.cond);
+
+	pw_deinit();
+	dpm.fd = -1;
+}
+
+static int output_data(char *buf, int32 bytes)
+{
+	int written;
+
+	while (bytes > 0) {
+		pthread_mutex_lock(&ctx.lock);
+		while (ctx.running && ringbuf_empty(&ctx.rb) == 0)
+			pthread_cond_wait(&ctx.cond, &ctx.lock);
+
+		if (!ctx.running) {
+			pthread_mutex_unlock(&ctx.lock);
+			return -1;
+		}
+
+		written = ringbuf_write(&ctx.rb, buf, bytes);
+		pthread_mutex_unlock(&ctx.lock);
+
+		buf += written;
+		bytes -= written;
+	}
+	return 0;
+}
+
+static int acntl(int request, void *arg)
+{
+	switch (request) {
+	case PM_REQ_GETFRAGSIZ:
+		if (ctx.frag_size == 0)
+			return -1;
+		*((int *)arg) = ctx.frag_size * ctx.sample_size;
+		return 0;
+
+	case PM_REQ_GETQSIZ:
+		*((int *)arg) = ctx.frag_size * ctx.frags * ctx.sample_size;
+		return 0;
+
+	case PM_REQ_GETFILLABLE:
+		pthread_mutex_lock(&ctx.lock);
+		*((int *)arg) = ringbuf_empty(&ctx.rb) / ctx.sample_size;
+		pthread_mutex_unlock(&ctx.lock);
+		return 0;
+
+	case PM_REQ_GETFILLED:
+		pthread_mutex_lock(&ctx.lock);
+		*((int *)arg) = ringbuf_available(&ctx.rb) / ctx.sample_size;
+		pthread_mutex_unlock(&ctx.lock);
+		return 0;
+
+	case PM_REQ_GETSAMPLES:
+		pthread_mutex_lock(&ctx.lock);
+		*((int *)arg) = ctx.samples_played;
+		pthread_mutex_unlock(&ctx.lock);
+		return 0;
+
+	case PM_REQ_FLUSH:
+		pthread_mutex_lock(&ctx.lock);
+		while (ctx.running && ringbuf_available(&ctx.rb) > 0)
+			pthread_cond_wait(&ctx.cond, &ctx.lock);
+		pthread_mutex_unlock(&ctx.lock);
+		/* fall through */
+	case PM_REQ_DISCARD:
+		pthread_mutex_lock(&ctx.lock);
+		ringbuf_clear(&ctx.rb);
+		ctx.samples_played = 0;
+		pthread_mutex_unlock(&ctx.lock);
+		return 0;
+
+	case PM_REQ_PLAY_START:
+		pthread_mutex_lock(&ctx.lock);
+		ctx.samples_played = 0;
+		ringbuf_clear(&ctx.rb);
+		pthread_mutex_unlock(&ctx.lock);
+		return 0;
+
+	case PM_REQ_PLAY_END:
+		return 0;
+	}
+	return -1;
+}

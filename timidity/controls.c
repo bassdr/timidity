@@ -152,6 +152,10 @@ extern ControlMode portmidisyn_control_mode;
 extern ControlMode npsyn_control_mode;
 #endif /* IA_NPSYN */
 
+#ifdef IA_PIPEWIRESYN
+extern ControlMode pipewire_control_mode;
+#endif /* IA_PIPEWIRESYN */
+
 
 #ifdef IA_MACOSX
 extern ControlMode macosx_control_mode;
@@ -229,6 +233,9 @@ ControlMode *ctl_list[]={
 #endif
 #ifdef IA_NPSYN
   &npsyn_control_mode,
+#endif
+#ifdef IA_PIPEWIRESYN
+  &pipewire_control_mode,
 #endif
   0
 };

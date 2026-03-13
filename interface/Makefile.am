@@ -133,7 +133,8 @@ EXTRA_libinterface_a_SOURCES = \
 	rtsyn_winmm.c \
 	rtsyn_portmidi.c \
 	rtsyn_npipe.c\
-	portmidisyn_c.c
+	portmidisyn_c.c \
+	pipewire_c.c
 
 if ENABLE_WRD
 WRD_OBJS = \

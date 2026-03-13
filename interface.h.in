@@ -55,6 +55,9 @@
 /* Define if you have Windows named pipe synthesizer mode interface. */
 #undef IA_NPSYN
 
+/* Define if you have PipeWire synthesizer mode interface. */
+#undef IA_PIPEWIRESYN
+
 #if defined(IA_W32GUI) || defined(IA_W32G_SYN)
 #ifndef __W32READDIR__
 #define __W32READDIR__

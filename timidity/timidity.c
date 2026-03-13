@@ -369,7 +369,7 @@ static const struct option longopts[] = {
 	{ "module",                 required_argument, NULL, TIM_OPT_MODULE },
 	{ NULL,                     no_argument,       NULL, '\0'     }
 };
-#define INTERACTIVE_INTERFACE_IDS "kmqagrwAWNP"
+#define INTERACTIVE_INTERFACE_IDS "kmqagrwAWNPp"
 
 /* main interfaces (To be used another main) */
 #if defined(main) || defined(ANOTHER_MAIN) || defined ( IA_W32GUI ) || defined ( IA_W32G_SYN )
@@ -5559,7 +5559,7 @@ MAIN_INTERFACE int timidity_pre_load_configuration(void)
 
 #else
     /* UNIX */
-    if(!read_config_file(CONFIG_FILE, 0, 0))
+    if(!read_config_file(CONFIG_FILE, 0, 1))
 		got_a_configuration = 1;
 #endif
 
@@ -5658,7 +5658,7 @@ MAIN_INTERFACE int timidity_post_load_configuration(void)
 
     if(!got_a_configuration)
     {
-	if(try_config_again && !read_config_file(CONFIG_FILE, 0, 0))
+	if(try_config_again && !read_config_file(CONFIG_FILE, 0, 1))
 	    got_a_configuration = 1;
     }
 

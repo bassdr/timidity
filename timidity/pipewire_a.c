@@ -42,6 +42,8 @@
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 
+#include <unistd.h>
+
 #include "timidity.h"
 #include "common.h"
 #include "output.h"
@@ -49,6 +51,14 @@
 #include "instrum.h"
 #include "playmidi.h"
 #include "miditrace.h"
+
+/*
+ * How long to wait for the PipeWire daemon when it isn't running yet.
+ * Useful for autostart (e.g. /etc/xdg/autostart) where TiMidity may
+ * launch before PipeWire is ready.
+ */
+#define PW_CONNECT_RETRIES  10
+#define PW_CONNECT_DELAY_US 1000000	/* 1 second */
 
 static int open_output(void);
 static void close_output(void);
@@ -260,9 +270,39 @@ done:
 	pw_stream_queue_buffer(c->stream, pwbuf);
 }
 
+/*
+ * Detect PipeWire daemon going away.  When the daemon shuts down the
+ * stream transitions to ERROR or UNCONNECTED — wake up the writer
+ * thread so output_data() can return instead of blocking forever.
+ */
+static void on_state_changed(void *userdata,
+			     enum pw_stream_state old,
+			     enum pw_stream_state state,
+			     const char *error)
+{
+	struct pw_ctx *c = (struct pw_ctx *)userdata;
+
+	/* ignore state changes during intentional teardown */
+	if (!c->running)
+		return;
+
+	if (state == PW_STREAM_STATE_ERROR ||
+	    (old >= PW_STREAM_STATE_PAUSED &&
+	     state == PW_STREAM_STATE_UNCONNECTED)) {
+		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+			  "PipeWire: daemon disconnected (%s)",
+			  error ? error : "connection lost");
+		pthread_mutex_lock(&c->lock);
+		c->running = 0;
+		pthread_cond_signal(&c->cond);
+		pthread_mutex_unlock(&c->lock);
+	}
+}
+
 static const struct pw_stream_events stream_events = {
 	PW_VERSION_STREAM_EVENTS,
 	.process = on_process,
+	.state_changed = on_state_changed,
 };
 
 
@@ -360,49 +400,71 @@ static int open_output(void)
 		return -1;
 	}
 
-	/* create stream with latency hint matching the fragment size */
+	/*
+	 * Create and connect the PipeWire stream.  pw_stream_new_simple
+	 * succeeds even when the daemon is down (it queues internally),
+	 * but pw_stream_connect will fail with EHOSTDOWN.  Retry both
+	 * together so autostart races are handled gracefully.
+	 */
 	{
 		char latency_str[64];
+		int try, connected = 0;
 		snprintf(latency_str, sizeof(latency_str),
 			 "%d/%d", ctx.frag_size, dpm.rate);
 
-		ctx.stream = pw_stream_new_simple(
-			pw_thread_loop_get_loop(ctx.loop),
-			"TiMidity++",
-			pw_properties_new(
-				PW_KEY_MEDIA_TYPE, "Audio",
-				PW_KEY_MEDIA_CATEGORY, "Playback",
-				PW_KEY_MEDIA_ROLE, "Music",
-				PW_KEY_NODE_LATENCY, latency_str,
-				NULL),
-			&stream_events, &ctx);
-	}
-	if (!ctx.stream) {
-		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
-			  "PipeWire: cannot create stream");
-		pw_thread_loop_destroy(ctx.loop);
-		return -1;
-	}
+		int max_retries = (ctl->flags & CTLF_DAEMONIZE)
+			? 0 : PW_CONNECT_RETRIES;
+		for (try = 0; max_retries == 0 || try < max_retries; try++) {
+			ctx.stream = pw_stream_new_simple(
+				pw_thread_loop_get_loop(ctx.loop),
+				"TiMidity++",
+				pw_properties_new(
+					PW_KEY_MEDIA_TYPE, "Audio",
+					PW_KEY_MEDIA_CATEGORY, "Playback",
+					PW_KEY_MEDIA_ROLE, "Music",
+					PW_KEY_NODE_LATENCY, latency_str,
+					NULL),
+				&stream_events, &ctx);
+			if (!ctx.stream)
+				goto retry;
 
-	/* build format params */
-	b = SPA_POD_BUILDER_INIT(pod_buffer, sizeof(pod_buffer));
-	params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
-		&SPA_AUDIO_INFO_RAW_INIT(
-			.format = spa_fmt,
-			.channels = ctx.channels,
-			.rate = dpm.rate));
+			b = SPA_POD_BUILDER_INIT(pod_buffer,
+						 sizeof(pod_buffer));
+			params[0] = spa_format_audio_raw_build(&b,
+				SPA_PARAM_EnumFormat,
+				&SPA_AUDIO_INFO_RAW_INIT(
+					.format = spa_fmt,
+					.channels = ctx.channels,
+					.rate = dpm.rate));
 
-	/* connect stream */
-	if (pw_stream_connect(ctx.stream,
-			PW_DIRECTION_OUTPUT, PW_ID_ANY,
-			PW_STREAM_FLAG_AUTOCONNECT |
-			PW_STREAM_FLAG_MAP_BUFFERS,
-			params, 1) < 0) {
-		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
-			  "PipeWire: cannot connect stream");
-		pw_stream_destroy(ctx.stream);
-		pw_thread_loop_destroy(ctx.loop);
-		return -1;
+			if (pw_stream_connect(ctx.stream,
+					PW_DIRECTION_OUTPUT, PW_ID_ANY,
+					PW_STREAM_FLAG_AUTOCONNECT |
+					PW_STREAM_FLAG_MAP_BUFFERS,
+					params, 1) == 0) {
+				connected = 1;
+				break;
+			}
+
+			pw_stream_destroy(ctx.stream);
+			ctx.stream = NULL;
+retry:
+			if (try == 0)
+				ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
+					  "PipeWire: daemon not ready, "
+					  "retrying...");
+			usleep(PW_CONNECT_DELAY_US);
+		}
+
+		if (!connected) {
+			ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+				  "PipeWire: cannot connect stream "
+				  "(is the PipeWire daemon running?)");
+			if (ctx.stream)
+				pw_stream_destroy(ctx.stream);
+			pw_thread_loop_destroy(ctx.loop);
+			return -1;
+		}
 	}
 
 	/* start the loop */

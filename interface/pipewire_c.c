@@ -38,6 +38,7 @@
 #include <math.h>
 #include <signal.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <sys/time.h>
 
 #include <pipewire/pipewire.h>
@@ -59,6 +60,13 @@
 void readmidi_read_init(void);
 
 #define TICKTIME_HZ 100
+
+/*
+ * PipeWire connection retry.  In daemon mode (-ipD) retries are
+ * unlimited; otherwise give up after PW_CONNECT_RETRIES attempts.
+ */
+#define PW_CONNECT_RETRIES  10
+#define PW_CONNECT_DELAY_US 1000000	/* 1 second */
 
 /*
  * MIDI event buffer: lock-free queue from PipeWire RT thread to main thread.
@@ -209,9 +217,37 @@ done:
 	pw_filter_queue_buffer(ctx->midi_port, buf);
 }
 
+/*
+ * quit_flag: set by SIGINT/SIGTERM — exit for real.
+ * pw_disconnected: set by PipeWire disconnect callback — reconnect loop.
+ */
+static volatile sig_atomic_t quit_flag;
+static volatile sig_atomic_t pw_disconnected;
+
+static void on_filter_state(void *data,
+			    enum pw_filter_state old,
+			    enum pw_filter_state state,
+			    const char *error)
+{
+	struct pw_midi_ctx *ctx = (struct pw_midi_ctx *)data;
+
+	/* ignore state changes during intentional teardown */
+	if (!ctx->running)
+		return;
+
+	if (state == PW_FILTER_STATE_ERROR ||
+	    (old >= PW_FILTER_STATE_PAUSED &&
+	     state == PW_FILTER_STATE_UNCONNECTED)) {
+		fprintf(stderr, "PipeWire: daemon disconnected (%s)\n",
+			error ? error : "connection lost");
+		pw_disconnected = 1;
+	}
+}
+
 static const struct pw_filter_events filter_events = {
 	PW_VERSION_FILTER_EVENTS,
 	.process = on_process,
+	.state_changed = on_filter_state,
 };
 
 
@@ -473,47 +509,197 @@ static int ctl_open(int using_stdin, int using_stdout)
 	return 0;
 }
 
+/*
+ * Tear down the PipeWire filter, autolink, and thread loop.
+ * Leaves pw_init/pw_deinit to the caller.
+ */
+static void pw_teardown(void)
+{
+	pwctx.running = 0;
+
+	if (!pwctx.loop)
+		return;
+
+	pw_thread_loop_lock(pwctx.loop);
+
+	pwctx.n_linked_ports = 0;
+	pwctx.n_midi_ports = 0;
+	pwctx.our_node_id = 0;
+	pwctx.our_port_id = 0;
+
+	/* disconnect the auxiliary core */
+	if (pwctx.registry) {
+		pw_proxy_destroy((struct pw_proxy *)pwctx.registry);
+		pwctx.registry = NULL;
+	}
+	if (pwctx.aux_core) {
+		pw_core_disconnect(pwctx.aux_core);
+		pwctx.aux_core = NULL;
+	}
+	if (pwctx.aux_ctx) {
+		pw_context_destroy(pwctx.aux_ctx);
+		pwctx.aux_ctx = NULL;
+	}
+
+	if (pwctx.filter)
+		pw_filter_disconnect(pwctx.filter);
+
+	pw_thread_loop_unlock(pwctx.loop);
+
+	pw_thread_loop_stop(pwctx.loop);
+	if (pwctx.filter)
+		pw_filter_destroy(pwctx.filter);
+	pw_thread_loop_destroy(pwctx.loop);
+	pwctx.filter = NULL;
+	pwctx.loop   = NULL;
+}
+
+/*
+ * Connect to PipeWire: create thread loop, filter, MIDI port, and
+ * optionally set up auto-linking.
+ *
+ * In daemon mode (-ipD) retries indefinitely; otherwise gives up
+ * after PW_CONNECT_RETRIES attempts.
+ *
+ * Returns 0 on success, -1 on failure or quit_flag.
+ */
+static int pw_setup(void)
+{
+	int daemon_mode = (ctl.flags & CTLF_DAEMONIZE);
+
+	/* create threaded loop */
+	pwctx.loop = pw_thread_loop_new("timidity-midi", NULL);
+	if (!pwctx.loop) {
+		fprintf(stderr, "PipeWire: cannot create thread loop\n");
+		return -1;
+	}
+
+	/* create and connect filter (retry until daemon is up) */
+	{
+		int try, connected = 0, logged = 0;
+		int max_retries = daemon_mode ? 0 : PW_CONNECT_RETRIES;
+
+		for (try = 0; max_retries == 0 || try < max_retries; try++) {
+			if (quit_flag)
+				goto fail;
+
+			pwctx.filter = pw_filter_new_simple(
+				pw_thread_loop_get_loop(pwctx.loop),
+				"TiMidity++",
+				pw_properties_new(
+					PW_KEY_MEDIA_TYPE, "Midi",
+					PW_KEY_MEDIA_CATEGORY, "Capture",
+					PW_KEY_MEDIA_CLASS, "Midi/Sink",
+					NULL),
+				&filter_events, &pwctx);
+			if (!pwctx.filter)
+				goto retry_filter;
+
+			pwctx.midi_port = pw_filter_add_port(pwctx.filter,
+				PW_DIRECTION_INPUT,
+				PW_FILTER_PORT_FLAG_MAP_BUFFERS,
+				0,
+				pw_properties_new(
+					PW_KEY_FORMAT_DSP, "8 bit raw midi",
+					PW_KEY_PORT_NAME, "input",
+					NULL),
+				NULL, 0);
+			if (!pwctx.midi_port) {
+				pw_filter_destroy(pwctx.filter);
+				pwctx.filter = NULL;
+				goto retry_filter;
+			}
+
+			if (pw_filter_connect(pwctx.filter,
+					PW_FILTER_FLAG_RT_PROCESS,
+					NULL, 0) == 0) {
+				connected = 1;
+				break;
+			}
+
+			pw_filter_destroy(pwctx.filter);
+			pwctx.filter = NULL;
+retry_filter:
+			if (!logged) {
+				fprintf(stderr,
+					"PipeWire: waiting for daemon...\n");
+				logged = 1;
+			}
+			usleep(PW_CONNECT_DELAY_US);
+		}
+
+		if (!connected) {
+			fprintf(stderr, "PipeWire: cannot connect "
+				"(is the PipeWire daemon running?)\n");
+			goto fail;
+		}
+	}
+
+	/* start the PipeWire loop */
+	if (pw_thread_loop_start(pwctx.loop) < 0) {
+		fprintf(stderr, "PipeWire: cannot start thread loop\n");
+		goto fail;
+	}
+
+	/* set up auto-linking if requested */
+	if (ctl.flags & CTLF_MIDI_AUTOLINK) {
+		pw_thread_loop_lock(pwctx.loop);
+
+		pwctx.aux_ctx = pw_context_new(
+			pw_thread_loop_get_loop(pwctx.loop), NULL, 0);
+
+		if (pwctx.aux_ctx)
+			pwctx.aux_core = pw_context_connect(
+				pwctx.aux_ctx, NULL, 0);
+
+		if (pwctx.aux_core) {
+			pw_core_add_listener(pwctx.aux_core,
+					     &pwctx.aux_core_listener,
+					     &aux_core_events, &pwctx);
+
+			pwctx.registry = pw_core_get_registry(
+				pwctx.aux_core, PW_VERSION_REGISTRY, 0);
+			pw_registry_add_listener(pwctx.registry,
+						 &pwctx.registry_listener,
+						 &registry_events, &pwctx);
+
+			pw_filter_add_listener(pwctx.filter,
+					       &pwctx.filter_state_listener,
+					       &filter_state_events, &pwctx);
+
+			/* wait for initial registry enumeration */
+			pwctx.init_sync_seq = pw_core_sync(
+				pwctx.aux_core, PW_ID_CORE, 0);
+			pw_thread_loop_wait(pwctx.loop);
+		} else {
+			fprintf(stderr,
+				"PipeWire MIDI: no auxiliary core, "
+				"auto-link disabled\n");
+		}
+
+		pw_thread_loop_unlock(pwctx.loop);
+	}
+
+	pwctx.running = 1;
+	pw_disconnected = 0;
+	return 0;
+
+fail:
+	if (pwctx.filter)
+		pw_filter_destroy(pwctx.filter);
+	if (pwctx.loop)
+		pw_thread_loop_destroy(pwctx.loop);
+	pwctx.filter = NULL;
+	pwctx.loop = NULL;
+	return -1;
+}
+
 static void ctl_close(void)
 {
-	int i;
-
 	if (!ctl.opened)
 		return;
 
-	pwctx.running = 0;
-
-	if (pwctx.loop) {
-		pw_thread_loop_lock(pwctx.loop);
-
-		pwctx.n_linked_ports = 0;
-
-		/* disconnect the auxiliary core */
-		if (pwctx.registry) {
-			pw_proxy_destroy((struct pw_proxy *)pwctx.registry);
-			pwctx.registry = NULL;
-		}
-		if (pwctx.aux_core) {
-			pw_core_disconnect(pwctx.aux_core);
-			pwctx.aux_core = NULL;
-		}
-		if (pwctx.aux_ctx) {
-			pw_context_destroy(pwctx.aux_ctx);
-			pwctx.aux_ctx = NULL;
-		}
-
-		if (pwctx.filter)
-			pw_filter_disconnect(pwctx.filter);
-
-		pw_thread_loop_unlock(pwctx.loop);
-
-		pw_thread_loop_stop(pwctx.loop);
-		if (pwctx.filter)
-			pw_filter_destroy(pwctx.filter);
-		pw_thread_loop_destroy(pwctx.loop);
-		pwctx.filter = NULL;
-		pwctx.loop   = NULL;
-	}
-
+	pw_teardown();
 	pw_deinit();
 	ctl.opened = 0;
 }
@@ -690,8 +876,10 @@ static void stop_sequencer(void)
  * happens in normal (non-signal) context.  Calling pw_thread_loop_lock,
  * pthread_mutex_lock, etc. from a signal handler is undefined behaviour
  * and can deadlock.
+ *
+ * quit_flag is declared earlier (near on_filter_state) so that both
+ * the PipeWire disconnect callback and signal handlers can use it.
  */
-static volatile sig_atomic_t quit_flag;
 
 static RETSIGTYPE sig_quit(int sig)
 {
@@ -706,7 +894,7 @@ static void doit(void)
 	struct midi_msg *msg;
 
 	for (;;) {
-		if (quit_flag)
+		if (quit_flag || pw_disconnected)
 			return;
 
 		/* drain all pending MIDI messages */
@@ -764,136 +952,11 @@ static int ctl_pass_playing_list(int n, char *args[])
 
 	pw_init(NULL, NULL);
 
-	/* create threaded loop */
-	pwctx.loop = pw_thread_loop_new("timidity-midi", NULL);
-	if (!pwctx.loop) {
-		fprintf(stderr, "PipeWire: cannot create thread loop\n");
-		return 1;
-	}
-
-	/* create filter for MIDI input */
-	pwctx.filter = pw_filter_new_simple(
-		pw_thread_loop_get_loop(pwctx.loop),
-		"TiMidity++",
-		pw_properties_new(
-			PW_KEY_MEDIA_TYPE, "Midi",
-			PW_KEY_MEDIA_CATEGORY, "Capture",
-			PW_KEY_MEDIA_CLASS, "Midi/Sink",
-			NULL),
-		&filter_events, &pwctx);
-
-	if (!pwctx.filter) {
-		fprintf(stderr, "PipeWire: cannot create filter\n");
-		pw_thread_loop_destroy(pwctx.loop);
-		return 1;
-	}
-
-	/* add MIDI input port */
-	pwctx.midi_port = pw_filter_add_port(pwctx.filter,
-		PW_DIRECTION_INPUT,
-		PW_FILTER_PORT_FLAG_MAP_BUFFERS,
-		0,
-		pw_properties_new(
-			PW_KEY_FORMAT_DSP, "8 bit raw midi",
-			PW_KEY_PORT_NAME, "input",
-			NULL),
-		NULL, 0);
-
-	if (!pwctx.midi_port) {
-		fprintf(stderr, "PipeWire: cannot create MIDI port\n");
-		pw_filter_destroy(pwctx.filter);
-		pw_thread_loop_destroy(pwctx.loop);
-		return 1;
-	}
-
-	/* connect filter */
-	if (pw_filter_connect(pwctx.filter,
-			PW_FILTER_FLAG_RT_PROCESS,
-			NULL, 0) < 0) {
-		fprintf(stderr, "PipeWire: cannot connect filter\n");
-		pw_filter_destroy(pwctx.filter);
-		pw_thread_loop_destroy(pwctx.loop);
-		return 1;
-	}
-
-	/* start the PipeWire loop */
-	if (pw_thread_loop_start(pwctx.loop) < 0) {
-		fprintf(stderr, "PipeWire: cannot start thread loop\n");
-		pw_filter_destroy(pwctx.filter);
-		pw_thread_loop_destroy(pwctx.loop);
-		return 1;
-	}
-
-	/*
-	 * Set up an auxiliary PipeWire connection for auto-linking
-	 * (-ipA / CTLF_MIDI_AUTOLINK):
-	 *   - watches the registry for MIDI source ports (keyboards)
-	 *   - creates lingering links from those ports to our filter input
-	 *   - handles hot-plug: new devices are linked automatically
-	 *
-	 * We share the same pw_thread_loop as the filter, so all
-	 * callbacks fire in the same PW event thread.
-	 */
-	if (ctl.flags & CTLF_MIDI_AUTOLINK) {
-		pw_thread_loop_lock(pwctx.loop);
-
-		pwctx.aux_ctx = pw_context_new(
-			pw_thread_loop_get_loop(pwctx.loop), NULL, 0);
-
-		if (pwctx.aux_ctx)
-			pwctx.aux_core = pw_context_connect(
-				pwctx.aux_ctx, NULL, 0);
-
-		if (pwctx.aux_core) {
-			pw_core_add_listener(pwctx.aux_core,
-					     &pwctx.aux_core_listener,
-					     &aux_core_events, &pwctx);
-
-			pwctx.registry = pw_core_get_registry(
-				pwctx.aux_core, PW_VERSION_REGISTRY, 0);
-			pw_registry_add_listener(pwctx.registry,
-						 &pwctx.registry_listener,
-						 &registry_events, &pwctx);
-
-			pw_filter_add_listener(pwctx.filter,
-					       &pwctx.filter_state_listener,
-					       &filter_state_events, &pwctx);
-
-			/* wait for initial registry enumeration */
-			pwctx.init_sync_seq = pw_core_sync(
-				pwctx.aux_core, PW_ID_CORE, 0);
-			pw_thread_loop_wait(pwctx.loop);
-		} else {
-			fprintf(stderr,
-				"PipeWire MIDI: no auxiliary core, "
-				"auto-link disabled\n");
-		}
-
-		pw_thread_loop_unlock(pwctx.loop);
-	}
-
-	pwctx.running = 1;
-	printf("PipeWire MIDI synthesizer ready\n");
-
-	/* initialize synthesis */
+	/* initialize synthesis (one-time) */
 	opt_realtime_playing = 1;
 	allocate_cache_size = 0;
 	current_keysig = (opt_init_keysig == 8) ? 0 : opt_init_keysig;
 	note_key_offset = key_adjust;
-
-	if (IS_STREAM_TRACE) {
-		play_mode->acntl(PM_REQ_GETFRAGSIZ, &pwctx.buffer_time_advance);
-		if (!(play_mode->encoding & PE_MONO))
-			pwctx.buffer_time_advance >>= 1;
-		if (play_mode->encoding & PE_16BIT)
-			pwctx.buffer_time_advance >>= 1;
-		aq_set_soft_queue(
-			(double)pwctx.buffer_time_advance / play_mode->rate * 1.01,
-			0.0);
-	} else {
-		pwctx.buffer_time_advance = 0;
-	}
-	pwctx.rate_frac = (double)play_mode->rate / 1000000.0;
 
 	alarm(0);
 	signal(SIGALRM, sig_timeout);
@@ -907,11 +970,77 @@ static int ctl_pass_playing_list(int n, char *args[])
 	j += note_key_offset, j -= floor(j / 12.0) * 12;
 	current_freq_table = j;
 
+	/*
+	 * Main loop.  In daemon mode (-ipD), on PipeWire daemon restart
+	 * we tear down and reconnect instead of exiting, so autostart
+	 * environments (e.g. /etc/xdg/autostart) that lack restart
+	 * semantics still work reliably.  Without -ipD, PipeWire
+	 * disconnect causes a clean exit.
+	 */
 	for (;;) {
-		server_reset();
-		doit();
+		if (pw_setup() < 0)
+			break;
+
+		/*
+		 * (Re)open the audio output.  On the first iteration the
+		 * framework has already opened it, but after a daemon-mode
+		 * reconnect we closed it (its PipeWire stream was dead)
+		 * and need to reopen.
+		 */
+		if (play_mode->fd == -1) {
+			if (play_mode->open_output() < 0) {
+				ctl.cmsg(CMSG_FATAL, VERB_NORMAL,
+					 "Couldn't open %s (`%c')",
+					 play_mode->id_name,
+					 play_mode->id_character);
+				pw_teardown();
+				break;
+			}
+		}
+
+		printf("PipeWire MIDI synthesizer ready\n");
+
+		if (IS_STREAM_TRACE) {
+			play_mode->acntl(PM_REQ_GETFRAGSIZ,
+					 &pwctx.buffer_time_advance);
+			if (!(play_mode->encoding & PE_MONO))
+				pwctx.buffer_time_advance >>= 1;
+			if (play_mode->encoding & PE_16BIT)
+				pwctx.buffer_time_advance >>= 1;
+			aq_set_soft_queue(
+				(double)pwctx.buffer_time_advance /
+				play_mode->rate * 1.01, 0.0);
+		} else {
+			pwctx.buffer_time_offset = 0;
+		}
+		pwctx.rate_frac = (double)play_mode->rate / 1000000.0;
+
+		for (;;) {
+			server_reset();
+			doit();
+			if (quit_flag || pw_disconnected)
+				break;
+		}
+
+		/* stop synthesis and close audio output (its PW stream
+		 * is dead too) before tearing down the MIDI filter */
+		if (pwctx.active)
+			stop_sequencer();
+		play_mode->close_output();
+
+		pw_teardown();
+
 		if (quit_flag)
 			break;
+
+		/* without daemon mode, disconnect is fatal */
+		if (!(ctl.flags & CTLF_DAEMONIZE))
+			break;
+
+		/* daemon mode: wait and reconnect */
+		fprintf(stderr,
+			"PipeWire: reconnecting...\n");
+		pw_disconnected = 0;
 	}
 
 	/* clean shutdown from normal context */

@@ -9,7 +9,6 @@ by `make install` — copy and adjust them for your distribution.
 | Path | Description |
 |------|-------------|
 | `config/timidity.cfg` | Reference config that sources patch sets from `/usr/share/timidity` and `~/.timidity` |
-| `config/50timidity++-gentoo.el` | Emacs site-lisp autoload (Gentoo-specific) |
 | `desktop/timidity.desktop` | XDG desktop entry |
 | `desktop/timidity.xpm` | Application icon (32x32) |
 | `openrc/timidity.initd` | OpenRC init script (supervise-daemon) |

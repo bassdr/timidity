@@ -10,6 +10,7 @@ by `make install` — copy and adjust them for your distribution.
 |------|-------------|
 | `config/timidity.cfg` | Reference config that sources patch sets from `/usr/share/timidity` and `~/.timidity` |
 | `desktop/timidity.desktop` | XDG desktop entry |
+| `desktop/timidity-autostart.desktop.example` | XDG autostart entry example — start TiMidity as a PipeWire MIDI daemon at login |
 | `desktop/timidity.xpm` | Application icon (32x32) |
 | `openrc/timidity.initd` | OpenRC init script (supervise-daemon) |
 | `openrc/timidity.confd` | OpenRC configuration defaults |

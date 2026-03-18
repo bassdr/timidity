@@ -307,19 +307,50 @@ static int open_output(void)
 		ctx.sample_size = ctx.channels;
 	}
 
-	/* buffer sizing */
+	/*
+	 * Buffer sizing.  PipeWire is a pull-model backend like JACK, so
+	 * the global audio_buffer_size default (2048 on Linux) is far too
+	 * large for responsive real-time MIDI — it alone adds ~47 ms of
+	 * latency at 44.1 kHz.
+	 *
+	 * When the user hasn't tuned -B, use a PipeWire-specific default
+	 * of 256 frames / 2 fragments (~5.8 ms at 44.1 kHz).  If the user
+	 * explicitly set the buffer bits via -B n,m we honour that.
+	 */
 	if (dpm.extra_param[1] != 0)
 		ctx.frag_size = dpm.extra_param[1];
+	else if (audio_buffer_bits != DEFAULT_AUDIO_BUFFER_BITS)
+		ctx.frag_size = audio_buffer_size; /* user set -B n,m */
 	else
-		ctx.frag_size = audio_buffer_size;
+		ctx.frag_size = 256;               /* PipeWire default */
 	if (dpm.extra_param[0] == 0)
-		ctx.frags = 4;
+		ctx.frags = 2;
 	else
 		ctx.frags = dpm.extra_param[0];
 
-	pthread_mutex_init(&ctx.lock, NULL);
-	pthread_cond_init(&ctx.cond, NULL);
-	ringbuf_init(&ctx.rb, ctx.frag_size * ctx.frags * ctx.sample_size);
+	/*
+	 * The ring buffer must be large enough for PipeWire's quantum.
+	 * PipeWire's default quantum is 1024 frames; the minimum safe
+	 * ring buffer is 2× that.  With -B8,2 the user-requested buffer
+	 * would be only 512 frames — far too small.  Clamp to a sane
+	 * minimum without overriding the user's fragment geometry.
+	 */
+	{
+		int rb_frames = ctx.frag_size * ctx.frags;
+		int min_frames = 4096;		/* safe for quantums up to 2048 */
+
+		if (rb_frames < min_frames) {
+			ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
+				  "PipeWire: buffer too small (%d frames), "
+				  "clamped to %d frames",
+				  rb_frames, min_frames);
+			rb_frames = min_frames;
+		}
+
+		pthread_mutex_init(&ctx.lock, NULL);
+		pthread_cond_init(&ctx.cond, NULL);
+		ringbuf_init(&ctx.rb, rb_frames * ctx.sample_size);
+	}
 
 	/* create threaded loop */
 	ctx.loop = pw_thread_loop_new("timidity-pw", NULL);
@@ -329,16 +360,23 @@ static int open_output(void)
 		return -1;
 	}
 
-	/* create stream */
-	ctx.stream = pw_stream_new_simple(
-		pw_thread_loop_get_loop(ctx.loop),
-		"TiMidity++",
-		pw_properties_new(
-			PW_KEY_MEDIA_TYPE, "Audio",
-			PW_KEY_MEDIA_CATEGORY, "Playback",
-			PW_KEY_MEDIA_ROLE, "Music",
-			NULL),
-		&stream_events, &ctx);
+	/* create stream with latency hint matching the fragment size */
+	{
+		char latency_str[64];
+		snprintf(latency_str, sizeof(latency_str),
+			 "%d/%d", ctx.frag_size, dpm.rate);
+
+		ctx.stream = pw_stream_new_simple(
+			pw_thread_loop_get_loop(ctx.loop),
+			"TiMidity++",
+			pw_properties_new(
+				PW_KEY_MEDIA_TYPE, "Audio",
+				PW_KEY_MEDIA_CATEGORY, "Playback",
+				PW_KEY_MEDIA_ROLE, "Music",
+				PW_KEY_NODE_LATENCY, latency_str,
+				NULL),
+			&stream_events, &ctx);
+	}
 	if (!ctx.stream) {
 		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
 			  "PipeWire: cannot create stream");

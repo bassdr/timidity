@@ -24,7 +24,7 @@
     in real-time. Works similarly to alsaseq_c.c but uses PipeWire's native
     MIDI transport instead of ALSA sequencer.
 
-    Usage: timidity -iW -OW   (PipeWire MIDI in + PipeWire audio out)
+    Usage: timidity -ip -OW   (PipeWire MIDI in + PipeWire audio out)
 */
 
 #ifdef HAVE_CONFIG_H
@@ -124,6 +124,9 @@ static inline void midibuf_clear(struct midi_ringbuf *rb)
 /*
  * PipeWire MIDI context
  */
+#define PW_MIDI_MAX_SRC_PORTS  64
+#define PW_MIDI_MAX_AUTO_LINKS 16
+
 struct pw_midi_ctx {
 	struct pw_thread_loop *loop;
 	struct pw_filter *filter;
@@ -140,6 +143,32 @@ struct pw_midi_ctx {
 	long cur_time_offset;
 	int buffer_time_advance;
 	long buffer_time_offset;
+
+	/* auto-linking: auxiliary core connection for registry + link mgmt */
+	struct pw_context   *aux_ctx;
+	struct pw_core      *aux_core;
+	struct pw_registry  *registry;
+	struct spa_hook      aux_core_listener;
+	struct spa_hook      registry_listener;
+	struct spa_hook      filter_state_listener;
+
+	uint32_t our_node_id;	/* node ID of our filter (0 = unknown) */
+	uint32_t our_port_id;	/* global ID of our MIDI input port (0 = unknown) */
+
+	/* all MIDI ports seen in the registry */
+	struct {
+		uint32_t id;       /* global object ID */
+		uint32_t node_id;  /* owning node ID */
+		int is_source;     /* 1 = direction "out" (sends MIDI) */
+	} midi_ports[PW_MIDI_MAX_SRC_PORTS];
+	int n_midi_ports;
+
+	/* source port IDs we have linked (to avoid duplicates on hot-plug) */
+	uint32_t linked_ports[PW_MIDI_MAX_AUTO_LINKS];
+	int n_linked_ports;
+
+	/* one-shot sync for initial registry dump */
+	int init_sync_seq;
 };
 
 static struct pw_midi_ctx pwctx;
@@ -187,6 +216,226 @@ static const struct pw_filter_events filter_events = {
 
 
 /*
+ * Check if we already linked a given source port (to avoid duplicates).
+ */
+static int is_port_linked(struct pw_midi_ctx *ctx, uint32_t src_port_id)
+{
+	int i;
+	for (i = 0; i < ctx->n_linked_ports; i++) {
+		if (ctx->linked_ports[i] == src_port_id)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * Auto-linking: create a PipeWire link from a MIDI source port to our
+ * filter's input port.  Must be called from the PW event thread
+ * (i.e. while the thread-loop lock is held by the event thread).
+ *
+ * Uses object.linger=true so the link persists server-side after we
+ * destroy the local proxy.  PipeWire automatically removes lingering
+ * links when either endpoint port disappears (e.g. device unplugged).
+ * This is the same approach used by pw-link(1).
+ */
+static void create_midi_link(struct pw_midi_ctx *ctx,
+			     uint32_t src_port_id,
+			     uint32_t dst_port_id)
+{
+	char src_str[16], dst_str[16];
+	struct pw_proxy *proxy;
+
+	if (is_port_linked(ctx, src_port_id))
+		return;
+
+	snprintf(src_str, sizeof(src_str), "%u", src_port_id);
+	snprintf(dst_str, sizeof(dst_str), "%u", dst_port_id);
+
+	struct spa_dict_item items[] = {
+		SPA_DICT_ITEM_INIT(PW_KEY_LINK_OUTPUT_PORT, src_str),
+		SPA_DICT_ITEM_INIT(PW_KEY_LINK_INPUT_PORT,  dst_str),
+		SPA_DICT_ITEM_INIT("object.linger", "true"),
+	};
+	struct spa_dict dict = SPA_DICT_INIT_ARRAY(items);
+
+	proxy = pw_core_create_object(ctx->aux_core,
+				      "link-factory",
+				      PW_TYPE_INTERFACE_Link,
+				      PW_VERSION_LINK,
+				      &dict, 0);
+	if (!proxy) {
+		fprintf(stderr,
+			"PipeWire MIDI: failed to link port %u -> %u\n",
+			src_port_id, dst_port_id);
+		return;
+	}
+	fprintf(stderr,
+		"PipeWire MIDI: auto-linked source port %u to TiMidity input\n",
+		src_port_id);
+
+	if (ctx->n_linked_ports < PW_MIDI_MAX_AUTO_LINKS)
+		ctx->linked_ports[ctx->n_linked_ports++] = src_port_id;
+
+	/* Drop the local proxy; the lingering link lives server-side. */
+	pw_proxy_destroy(proxy);
+}
+
+static void try_link_sources(struct pw_midi_ctx *ctx)
+{
+	int i;
+	if (ctx->our_port_id == 0)
+		return;
+	for (i = 0; i < ctx->n_midi_ports; i++) {
+		if (ctx->midi_ports[i].is_source &&
+		    ctx->midi_ports[i].node_id != ctx->our_node_id)
+			create_midi_link(ctx,
+					 ctx->midi_ports[i].id,
+					 ctx->our_port_id);
+	}
+}
+
+/*
+ * Registry event: fired for every global object (node, port, link…).
+ * We track MIDI ports here and create links when both sides are known.
+ */
+static void registry_event_global(void *data, uint32_t id,
+				  uint32_t permissions, const char *type,
+				  uint32_t version,
+				  const struct spa_dict *props)
+{
+	struct pw_midi_ctx *ctx = (struct pw_midi_ctx *)data;
+	const char *direction, *format, *node_id_str;
+	uint32_t node_id;
+	int is_source;
+
+	if (strcmp(type, PW_TYPE_INTERFACE_Port) != 0)
+		return;
+
+	direction   = spa_dict_lookup(props, "port.direction");
+	format      = spa_dict_lookup(props, "format.dsp");
+	node_id_str = spa_dict_lookup(props, "node.id");
+
+	if (!direction || !format || !node_id_str)
+		return;
+	if (strcmp(format, "8 bit raw midi") != 0)
+		return;
+
+	is_source = (strcmp(direction, "out") == 0);
+	node_id   = (uint32_t)atoi(node_id_str);
+
+	/* store for later use */
+	if (ctx->n_midi_ports < PW_MIDI_MAX_SRC_PORTS) {
+		ctx->midi_ports[ctx->n_midi_ports].id        = id;
+		ctx->midi_ports[ctx->n_midi_ports].node_id   = node_id;
+		ctx->midi_ports[ctx->n_midi_ports].is_source = is_source;
+		ctx->n_midi_ports++;
+	}
+
+	if (is_source) {
+		/* New MIDI source: link it now if we already know our port */
+		if (ctx->our_port_id != 0 && node_id != ctx->our_node_id)
+			create_midi_link(ctx, id, ctx->our_port_id);
+	} else {
+		/* "in" direction port: check if this is ours */
+		if (ctx->our_node_id != 0 && node_id == ctx->our_node_id
+		    && ctx->our_port_id == 0) {
+			ctx->our_port_id = id;
+			try_link_sources(ctx);
+		}
+	}
+}
+
+/*
+ * Registry remove: a global object was destroyed (e.g. MIDI controller
+ * unplugged).  Clean up our tracking arrays so slots can be reused
+ * when the device reappears with new IDs.
+ */
+static void registry_event_global_remove(void *data, uint32_t id)
+{
+	struct pw_midi_ctx *ctx = (struct pw_midi_ctx *)data;
+	int i;
+
+	/* remove from midi_ports[] */
+	for (i = 0; i < ctx->n_midi_ports; i++) {
+		if (ctx->midi_ports[i].id == id) {
+			ctx->midi_ports[i] =
+				ctx->midi_ports[--ctx->n_midi_ports];
+			break;
+		}
+	}
+
+	/* remove from linked_ports[] so hot-plug re-creates the link */
+	for (i = 0; i < ctx->n_linked_ports; i++) {
+		if (ctx->linked_ports[i] == id) {
+			ctx->linked_ports[i] =
+				ctx->linked_ports[--ctx->n_linked_ports];
+			break;
+		}
+	}
+}
+
+static const struct pw_registry_events registry_events = {
+	PW_VERSION_REGISTRY_EVENTS,
+	.global = registry_event_global,
+	.global_remove = registry_event_global_remove,
+};
+
+/*
+ * Core done callback: signals the main thread that the initial registry
+ * enumeration is complete.
+ */
+static void aux_core_done(void *data, uint32_t id, int seq)
+{
+	struct pw_midi_ctx *ctx = (struct pw_midi_ctx *)data;
+	if (seq == ctx->init_sync_seq)
+		pw_thread_loop_signal(ctx->loop, false);
+}
+
+static const struct pw_core_events aux_core_events = {
+	PW_VERSION_CORE_EVENTS,
+	.done = aux_core_done,
+};
+
+/*
+ * Filter state-changed callback (added as an extra listener after creation).
+ * Once the filter transitions to PAUSED (i.e. it is bound to the graph),
+ * we can read our node ID and start linking.
+ */
+static void filter_state_changed(void *data,
+				 enum pw_filter_state old,
+				 enum pw_filter_state state,
+				 const char *error)
+{
+	struct pw_midi_ctx *ctx = (struct pw_midi_ctx *)data;
+	int i;
+
+	if (state != PW_FILTER_STATE_PAUSED || ctx->our_node_id != 0)
+		return;
+
+	ctx->our_node_id = pw_filter_get_node_id(ctx->filter);
+	if (ctx->our_node_id == 0)
+		return;
+
+	/* Scan already-registered ports for our own input port */
+	for (i = 0; i < ctx->n_midi_ports; i++) {
+		if (!ctx->midi_ports[i].is_source &&
+		    ctx->midi_ports[i].node_id == ctx->our_node_id) {
+			ctx->our_port_id = ctx->midi_ports[i].id;
+			break;
+		}
+	}
+
+	if (ctx->our_port_id != 0)
+		try_link_sources(ctx);
+}
+
+static const struct pw_filter_events filter_state_events = {
+	PW_VERSION_FILTER_EVENTS,
+	.state_changed = filter_state_changed,
+};
+
+
+/*
  * ControlMode callbacks
  */
 
@@ -226,24 +475,43 @@ static int ctl_open(int using_stdin, int using_stdout)
 
 static void ctl_close(void)
 {
+	int i;
+
 	if (!ctl.opened)
 		return;
 
 	pwctx.running = 0;
 
-	if (pwctx.filter) {
-		pw_thread_loop_lock(pwctx.loop);
-		pw_filter_disconnect(pwctx.filter);
-		pw_thread_loop_unlock(pwctx.loop);
-	}
-
 	if (pwctx.loop) {
+		pw_thread_loop_lock(pwctx.loop);
+
+		pwctx.n_linked_ports = 0;
+
+		/* disconnect the auxiliary core */
+		if (pwctx.registry) {
+			pw_proxy_destroy((struct pw_proxy *)pwctx.registry);
+			pwctx.registry = NULL;
+		}
+		if (pwctx.aux_core) {
+			pw_core_disconnect(pwctx.aux_core);
+			pwctx.aux_core = NULL;
+		}
+		if (pwctx.aux_ctx) {
+			pw_context_destroy(pwctx.aux_ctx);
+			pwctx.aux_ctx = NULL;
+		}
+
+		if (pwctx.filter)
+			pw_filter_disconnect(pwctx.filter);
+
+		pw_thread_loop_unlock(pwctx.loop);
+
 		pw_thread_loop_stop(pwctx.loop);
 		if (pwctx.filter)
 			pw_filter_destroy(pwctx.filter);
 		pw_thread_loop_destroy(pwctx.loop);
 		pwctx.filter = NULL;
-		pwctx.loop = NULL;
+		pwctx.loop   = NULL;
 	}
 
 	pw_deinit();
@@ -417,6 +685,20 @@ static void stop_sequencer(void)
 
 
 /*
+ * Graceful shutdown: the signal handler only sets a flag; the main
+ * loop checks it and exits cleanly so that all PipeWire teardown
+ * happens in normal (non-signal) context.  Calling pw_thread_loop_lock,
+ * pthread_mutex_lock, etc. from a signal handler is undefined behaviour
+ * and can deadlock.
+ */
+static volatile sig_atomic_t quit_flag;
+
+static RETSIGTYPE sig_quit(int sig)
+{
+	quit_flag = 1;
+}
+
+/*
  * Main event loop
  */
 static void doit(void)
@@ -424,6 +706,9 @@ static void doit(void)
 	struct midi_msg *msg;
 
 	for (;;) {
+		if (quit_flag)
+			return;
+
 		/* drain all pending MIDI messages */
 		while ((msg = midibuf_peek(&pwctx.midibuf)) != NULL) {
 			if (!pwctx.active) {
@@ -539,8 +824,56 @@ static int ctl_pass_playing_list(int n, char *args[])
 		return 1;
 	}
 
+	/*
+	 * Set up an auxiliary PipeWire connection for auto-linking
+	 * (-ipA / CTLF_MIDI_AUTOLINK):
+	 *   - watches the registry for MIDI source ports (keyboards)
+	 *   - creates lingering links from those ports to our filter input
+	 *   - handles hot-plug: new devices are linked automatically
+	 *
+	 * We share the same pw_thread_loop as the filter, so all
+	 * callbacks fire in the same PW event thread.
+	 */
+	if (ctl.flags & CTLF_MIDI_AUTOLINK) {
+		pw_thread_loop_lock(pwctx.loop);
+
+		pwctx.aux_ctx = pw_context_new(
+			pw_thread_loop_get_loop(pwctx.loop), NULL, 0);
+
+		if (pwctx.aux_ctx)
+			pwctx.aux_core = pw_context_connect(
+				pwctx.aux_ctx, NULL, 0);
+
+		if (pwctx.aux_core) {
+			pw_core_add_listener(pwctx.aux_core,
+					     &pwctx.aux_core_listener,
+					     &aux_core_events, &pwctx);
+
+			pwctx.registry = pw_core_get_registry(
+				pwctx.aux_core, PW_VERSION_REGISTRY, 0);
+			pw_registry_add_listener(pwctx.registry,
+						 &pwctx.registry_listener,
+						 &registry_events, &pwctx);
+
+			pw_filter_add_listener(pwctx.filter,
+					       &pwctx.filter_state_listener,
+					       &filter_state_events, &pwctx);
+
+			/* wait for initial registry enumeration */
+			pwctx.init_sync_seq = pw_core_sync(
+				pwctx.aux_core, PW_ID_CORE, 0);
+			pw_thread_loop_wait(pwctx.loop);
+		} else {
+			fprintf(stderr,
+				"PipeWire MIDI: no auxiliary core, "
+				"auto-link disabled\n");
+		}
+
+		pw_thread_loop_unlock(pwctx.loop);
+	}
+
 	pwctx.running = 1;
-	printf("PipeWire MIDI sink ready, waiting for connections...\n");
+	printf("PipeWire MIDI synthesizer ready\n");
 
 	/* initialize synthesis */
 	opt_realtime_playing = 1;
@@ -564,8 +897,8 @@ static int ctl_pass_playing_list(int n, char *args[])
 
 	alarm(0);
 	signal(SIGALRM, sig_timeout);
-	signal(SIGINT, safe_exit);
-	signal(SIGTERM, safe_exit);
+	signal(SIGINT, sig_quit);
+	signal(SIGTERM, sig_quit);
 	signal(SIGHUP, sig_reset);
 
 	i = current_keysig + ((current_keysig < 8) ? 7 : -9), j = 0;
@@ -577,15 +910,12 @@ static int ctl_pass_playing_list(int n, char *args[])
 	for (;;) {
 		server_reset();
 		doit();
+		if (quit_flag)
+			break;
 	}
 
-	/* cleanup (unreachable, but for completeness) */
-	pwctx.running = 0;
-	pw_thread_loop_stop(pwctx.loop);
-	pw_filter_destroy(pwctx.filter);
-	pw_thread_loop_destroy(pwctx.loop);
-	pw_deinit();
-
+	/* clean shutdown from normal context */
+	safe_exit(0);
 	return 0;
 }
 

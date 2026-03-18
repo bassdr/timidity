@@ -1,0 +1,25 @@
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+
+[*.{c,h}]
+indent_style = tab
+indent_size = 8
+tab_width = 8
+
+[*.am]
+indent_style = tab
+indent_size = 8
+tab_width = 8
+
+[*.{ac,m4}]
+indent_style = space
+indent_size = 2
+
+[*.sh]
+indent_style = tab
+indent_size = 8
+tab_width = 8

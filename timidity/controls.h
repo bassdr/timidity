@@ -145,7 +145,8 @@ typedef struct {
 #define CTLF_AUTOUNIQ		(1u<<6)	/* -i?u */
 #define CTLF_AUTOREFINE		(1u<<7)	/* -i?R */
 #define CTLF_NOT_CONTINUE	(1u<<8)	/* -i?C */
-#define CTLF_DAEMONIZE		(1u<<9) /* -i?D */
+#define CTLF_DAEMONIZE		(1u<<9)  /* -i?D */
+#define CTLF_MIDI_AUTOLINK	(1u<<10) /* -i?A */
 
   int  (*open)(int using_stdin, int using_stdout);
   void (*close)(void);

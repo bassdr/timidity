@@ -165,6 +165,7 @@ enum {
 	TIM_OPT_RANDOM,
 	TIM_OPT_SORT,
 	TIM_OPT_BACKGROUND,
+	TIM_OPT_AUTOLINK,
 	TIM_OPT_RT_PRIO,
 	TIM_OPT_SEQ_PORTS,
 	TIM_OPT_RTSYN_LATENCY,
@@ -295,9 +296,15 @@ static const struct option longopts[] = {
 	{ "random",                 optional_argument, NULL, TIM_OPT_RANDOM },
 	{ "no-sort",                no_argument,       NULL, TIM_OPT_SORT },
 	{ "sort",                   optional_argument, NULL, TIM_OPT_SORT },
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 	{ "no-background",          no_argument,       NULL, TIM_OPT_BACKGROUND },
 	{ "background",             optional_argument, NULL, TIM_OPT_BACKGROUND },
+#endif
+#ifdef IA_PIPEWIRESYN
+	{ "no-autolink",            no_argument,       NULL, TIM_OPT_AUTOLINK },
+	{ "autolink",               optional_argument, NULL, TIM_OPT_AUTOLINK },
+#endif
+#ifdef IA_ALSASEQ
 	{ "realtime-priority",      required_argument, NULL, TIM_OPT_RT_PRIO },
 	{ "sequencer-ports",        required_argument, NULL, TIM_OPT_SEQ_PORTS },
 #endif
@@ -459,8 +466,13 @@ static inline int parse_opt_trace(const char *);
 static inline int parse_opt_loop(const char *);
 static inline int parse_opt_random(const char *);
 static inline int parse_opt_sort(const char *);
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 static inline int parse_opt_background(const char *);
+#endif
+#ifdef IA_PIPEWIRESYN
+static inline int parse_opt_autolink(const char *);
+#endif
+#ifdef IA_ALSASEQ
 static inline int parse_opt_rt_prio(const char *);
 static inline int parse_opt_seq_ports(const char *);
 #endif
@@ -2825,9 +2837,15 @@ MAIN_INTERFACE int set_tim_opt_long(int c, char *optarg, int index)
 		return parse_opt_random(arg);
 	case TIM_OPT_SORT:
 		return parse_opt_sort(arg);
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 	case TIM_OPT_BACKGROUND:
 		return parse_opt_background(arg);
+#endif
+#ifdef IA_PIPEWIRESYN
+	case TIM_OPT_AUTOLINK:
+		return parse_opt_autolink(arg);
+#endif
+#ifdef IA_ALSASEQ
 	case TIM_OPT_RT_PRIO:
 		return parse_opt_rt_prio(arg);
 	case TIM_OPT_SEQ_PORTS:
@@ -4239,6 +4257,10 @@ static int parse_opt_h(const char *arg)
 	fputs("  `D'          daemonize TiMidity++ in background "
 			"(for alsaseq/pipewiresyn)" NLS, fp);
 #endif
+#ifdef IA_PIPEWIRESYN
+	fputs("  `A'          auto-link MIDI sources "
+			"(for pipewiresyn)" NLS, fp);
+#endif
 	fputs(NLS, fp);
 	fputs("Alternative interface long options:" NLS
 "  --verbose=n" NLS
@@ -4249,6 +4271,9 @@ static int parse_opt_h(const char *arg)
 "  --[no-]sort" NLS, fp);
 #if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 	fputs("  --[no-]background" NLS, fp);
+#endif
+#ifdef IA_PIPEWIRESYN
+	fputs("  --[no-]autolink" NLS, fp);
 #endif
 	fputs(NLS, fp);
 	fputs("Available output modes (-O, --output-mode option):" NLS, fp);
@@ -4434,9 +4459,14 @@ static inline int parse_opt_i(const char *arg)
 		case 'C':
 			cmp->flags ^= CTLF_NOT_CONTINUE;
 			break;
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 		case 'D':
 			cmp->flags ^= CTLF_DAEMONIZE;
+			break;
+#endif
+#ifdef IA_PIPEWIRESYN
+		case 'A':
+			cmp->flags ^= CTLF_MIDI_AUTOLINK;
 			break;
 #endif
 		default:
@@ -4486,13 +4516,23 @@ static inline int parse_opt_sort(const char *arg)
 	return set_flag(&(ctl->flags), CTLF_LIST_SORT, arg);
 }
 
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 static inline int parse_opt_background(const char *arg)
 {
 	/* --[no-]background */
 	return set_flag(&(ctl->flags), CTLF_DAEMONIZE, arg);
 }
+#endif
 
+#ifdef IA_PIPEWIRESYN
+static inline int parse_opt_autolink(const char *arg)
+{
+	/* --[no-]autolink */
+	return set_flag(&(ctl->flags), CTLF_MIDI_AUTOLINK, arg);
+}
+#endif
+
+#ifdef IA_ALSASEQ
 static inline int parse_opt_rt_prio(const char *arg)
 {
 	/* --realtime-priority */

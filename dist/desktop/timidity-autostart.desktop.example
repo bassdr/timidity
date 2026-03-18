@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=TiMidity++
+Comment=Start TiMidity++ as a PipeWire MIDI synthesizer at login
+Exec=/usr/bin/timidity -ipAD -B3,10 -OW
+Terminal=false
+Type=Application
+X-GNOME-HiddenUnderSystemd=true
+X-KDE-HiddenUnderSystemd=true
+X-systemd-skip=true

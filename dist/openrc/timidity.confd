@@ -5,8 +5,9 @@
 # Interface mode (set by the ebuild based on USE flags):
 #   -iA          : ALSA sequencer (default without USE=pipewire)
 #   -ip          : PipeWire MIDI synthesizer (default with USE=pipewire)
+#   -ipA         : PipeWire MIDI synthesizer with auto-discovery of MIDI devices
 # Override by setting TIMIDITY_INTERFACE below.
-#TIMIDITY_INTERFACE="-iA"
+#TIMIDITY_INTERFACE="-ipA"
 
 # Output driver:
 #   -Os          : ALSA PCM direct output (default without USE=pipewire)
@@ -18,7 +19,7 @@
 #   -EFreverb=0  : disable reverb (saves CPU)
 #   -EFreverb=1  : enable reverb
 
-TIMIDITY_OPTS="-B2,8 -EFreverb=0"
+#TIMIDITY_OPTS="-EFreverb=0"
 
 # PipeWire system socket location (default: /run/pipewire).
 # Change this only if your system-wide PipeWire uses a non-standard path.

@@ -355,6 +355,11 @@ static int open_output(void)
 	 * When the user hasn't tuned -B, use a PipeWire-specific default
 	 * of 256 frames / 2 fragments (~5.8 ms at 44.1 kHz).  If the user
 	 * explicitly set the buffer bits via -B n,m we honour that.
+	 *
+	 * For interactive interfaces (-iA, -ip, etc.) we also shrink the
+	 * global audio_buffer_size so the synthesis engine computes in
+	 * matching small batches — otherwise the engine's 2048-frame
+	 * default adds ~47 ms on top of the PipeWire buffer latency.
 	 */
 	if (dpm.extra_param[1] != 0)
 		ctx.frag_size = dpm.extra_param[1];
@@ -366,6 +371,15 @@ static int open_output(void)
 		ctx.frags = 2;
 	else
 		ctx.frags = dpm.extra_param[0];
+
+	/* In interactive mode, shrink the synthesis batch size to match
+	 * the PipeWire fragment size, unless the user set -B explicitly. */
+	if (audio_buffer_bits == DEFAULT_AUDIO_BUFFER_BITS &&
+	    strchr("ApmNP", ctl->id_character)) {
+		int bits = 0, s = ctx.frag_size;
+		while (s > 1) { s >>= 1; bits++; }
+		audio_buffer_bits = bits;	/* e.g. 256 -> 8 */
+	}
 
 	/*
 	 * The ring buffer must be large enough for PipeWire's quantum.

@@ -53,11 +53,10 @@
 #include "miditrace.h"
 
 /*
- * How long to wait for the PipeWire daemon when it isn't running yet.
- * Useful for autostart (e.g. /etc/xdg/autostart) where TiMidity may
- * launch before PipeWire is ready.
+ * Retry delay for connecting to the PipeWire daemon.  System services
+ * or autostart entries may launch before PipeWire is ready.
+ * Retries indefinitely until connected or the process is killed.
  */
-#define PW_CONNECT_RETRIES  10
 #define PW_CONNECT_DELAY_US 1000000	/* 1 second */
 
 static int open_output(void);
@@ -408,13 +407,11 @@ static int open_output(void)
 	 */
 	{
 		char latency_str[64];
-		int try, connected = 0;
+		int logged = 0;
 		snprintf(latency_str, sizeof(latency_str),
 			 "%d/%d", ctx.frag_size, dpm.rate);
 
-		int max_retries = (ctl->flags & CTLF_DAEMONIZE)
-			? 0 : PW_CONNECT_RETRIES;
-		for (try = 0; max_retries == 0 || try < max_retries; try++) {
+		for (;;) {
 			ctx.stream = pw_stream_new_simple(
 				pw_thread_loop_get_loop(ctx.loop),
 				"TiMidity++",
@@ -441,29 +438,19 @@ static int open_output(void)
 					PW_DIRECTION_OUTPUT, PW_ID_ANY,
 					PW_STREAM_FLAG_AUTOCONNECT |
 					PW_STREAM_FLAG_MAP_BUFFERS,
-					params, 1) == 0) {
-				connected = 1;
+					params, 1) == 0)
 				break;
-			}
 
 			pw_stream_destroy(ctx.stream);
 			ctx.stream = NULL;
 retry:
-			if (try == 0)
+			if (!logged) {
 				ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
 					  "PipeWire: daemon not ready, "
 					  "retrying...");
+				logged = 1;
+			}
 			usleep(PW_CONNECT_DELAY_US);
-		}
-
-		if (!connected) {
-			ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
-				  "PipeWire: cannot connect stream "
-				  "(is the PipeWire daemon running?)");
-			if (ctx.stream)
-				pw_stream_destroy(ctx.stream);
-			pw_thread_loop_destroy(ctx.loop);
-			return -1;
 		}
 	}
 

@@ -62,10 +62,9 @@ void readmidi_read_init(void);
 #define TICKTIME_HZ 100
 
 /*
- * PipeWire connection retry.  In daemon mode (-ipD) retries are
- * unlimited; otherwise give up after PW_CONNECT_RETRIES attempts.
+ * PipeWire connection retry.  The MIDI server always retries
+ * indefinitely — only quit_flag (SIGINT/SIGTERM) stops it.
  */
-#define PW_CONNECT_RETRIES  10
 #define PW_CONNECT_DELAY_US 1000000	/* 1 second */
 
 /*
@@ -558,15 +557,12 @@ static void pw_teardown(void)
  * Connect to PipeWire: create thread loop, filter, MIDI port, and
  * optionally set up auto-linking.
  *
- * In daemon mode (-ipD) retries indefinitely; otherwise gives up
- * after PW_CONNECT_RETRIES attempts.
+ * Retries indefinitely until connected or quit_flag is set.
  *
  * Returns 0 on success, -1 on failure or quit_flag.
  */
 static int pw_setup(void)
 {
-	int daemon_mode = (ctl.flags & CTLF_DAEMONIZE);
-
 	/* create threaded loop */
 	pwctx.loop = pw_thread_loop_new("timidity-midi", NULL);
 	if (!pwctx.loop) {
@@ -576,10 +572,9 @@ static int pw_setup(void)
 
 	/* create and connect filter (retry until daemon is up) */
 	{
-		int try, connected = 0, logged = 0;
-		int max_retries = daemon_mode ? 0 : PW_CONNECT_RETRIES;
+		int logged = 0;
 
-		for (try = 0; max_retries == 0 || try < max_retries; try++) {
+		for (;;) {
 			if (quit_flag)
 				goto fail;
 
@@ -590,6 +585,7 @@ static int pw_setup(void)
 					PW_KEY_MEDIA_TYPE, "Midi",
 					PW_KEY_MEDIA_CATEGORY, "Capture",
 					PW_KEY_MEDIA_CLASS, "Midi/Sink",
+					PW_KEY_NODE_LATENCY, "256/48000",
 					NULL),
 				&filter_events, &pwctx);
 			if (!pwctx.filter)
@@ -612,10 +608,8 @@ static int pw_setup(void)
 
 			if (pw_filter_connect(pwctx.filter,
 					PW_FILTER_FLAG_RT_PROCESS,
-					NULL, 0) == 0) {
-				connected = 1;
+					NULL, 0) == 0)
 				break;
-			}
 
 			pw_filter_destroy(pwctx.filter);
 			pwctx.filter = NULL;
@@ -626,12 +620,6 @@ retry_filter:
 				logged = 1;
 			}
 			usleep(PW_CONNECT_DELAY_US);
-		}
-
-		if (!connected) {
-			fprintf(stderr, "PipeWire: cannot connect "
-				"(is the PipeWire daemon running?)\n");
-			goto fail;
 		}
 	}
 
@@ -971,11 +959,10 @@ static int ctl_pass_playing_list(int n, char *args[])
 	current_freq_table = j;
 
 	/*
-	 * Main loop.  In daemon mode (-ipD), on PipeWire daemon restart
-	 * we tear down and reconnect instead of exiting, so autostart
-	 * environments (e.g. /etc/xdg/autostart) that lack restart
-	 * semantics still work reliably.  Without -ipD, PipeWire
-	 * disconnect causes a clean exit.
+	 * Main loop.  On PipeWire daemon restart we tear down and
+	 * reconnect instead of exiting, so init scripts and autostart
+	 * environments work reliably without requiring -ipD.
+	 * Only quit_flag (SIGINT/SIGTERM) causes a clean exit.
 	 */
 	for (;;) {
 		if (pw_setup() < 0)
@@ -1033,11 +1020,7 @@ static int ctl_pass_playing_list(int n, char *args[])
 		if (quit_flag)
 			break;
 
-		/* without daemon mode, disconnect is fatal */
-		if (!(ctl.flags & CTLF_DAEMONIZE))
-			break;
-
-		/* daemon mode: wait and reconnect */
+		/* wait and reconnect */
 		fprintf(stderr,
 			"PipeWire: reconnecting...\n");
 		pw_disconnected = 0;

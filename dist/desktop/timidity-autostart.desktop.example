@@ -2,7 +2,10 @@
 Version=1.0
 Name=TiMidity++
 Comment=Start TiMidity++ as a PipeWire MIDI synthesizer at login
-Exec=/usr/bin/timidity -ipAD -B3,10 -OW
+# Wait for PipeWire to be ready before starting.  Adjust the pw-cli
+# check if you want to wait for a specific audio device (e.g. replace
+# "Node" with a grep for your device name).
+Exec=bash -c 'while ! pw-cli info 0 >/dev/null 2>&1; do sleep 1; done; exec /usr/bin/timidity -ipAD -B3,10 -OW'
 Terminal=false
 Type=Application
 X-GNOME-HiddenUnderSystemd=true

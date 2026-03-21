@@ -12,7 +12,7 @@
 
 : "${TIMIDITY_USER:=timidity}"
 : "${TIMIDITY_RUNTIME_DIR:=/run/pipewire}"
-: "${TIMIDITY_INTERFACE:=-iA}"
+: "${TIMIDITY_INTERFACE:=-ipA}"
 
 supervisor=supervise-daemon
 command="/usr/bin/timidity"

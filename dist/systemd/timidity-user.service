@@ -1,0 +1,24 @@
+# Systemd user service for TiMidity++ PipeWire MIDI synthesizer.
+#
+# Install:
+#   cp timidity-user.service ~/.config/systemd/user/timidity.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now timidity.service
+#
+# TiMidity will start automatically whenever PipeWire starts and appear
+# as "TiMidity MIDI Sink" in the PipeWire graph.
+#
+# Requires TiMidity++ built with --enable-pipewiresyn --enable-audio=pipewire.
+
+[Unit]
+Description=TiMidity++ MIDI Synthesizer (PipeWire)
+After=pipewire.service
+BindsTo=pipewire.service
+
+[Service]
+ExecStart=/usr/bin/timidity -ip -OW -B2,8 -EFreverb=0
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=pipewire.service

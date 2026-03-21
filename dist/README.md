@@ -9,12 +9,14 @@ by `make install` — copy and adjust them for your distribution.
 | Path | Description |
 |------|-------------|
 | `config/timidity.cfg` | Reference config that sources patch sets from `/usr/share/timidity` and `~/.timidity` |
+| `config/50timidity++-gentoo.el` | Emacs integration (sets `timidity-prog-path`) |
 | `desktop/timidity.desktop` | XDG desktop entry |
 | `desktop/timidity-autostart.desktop.example` | XDG autostart entry example — start TiMidity as a PipeWire MIDI daemon at login |
 | `desktop/timidity.xpm` | Application icon (32x32) |
 | `openrc/timidity.initd` | OpenRC init script (supervise-daemon) |
 | `openrc/timidity.confd` | OpenRC configuration defaults |
-| `systemd/timidity.service` | systemd unit file |
+| `systemd/timidity.service` | systemd system service for ALSA sequencer mode (`-iA`) |
+| `systemd/timidity-user.service` | systemd user service for PipeWire MIDI synthesis (`-ip -OW`) |
 | `udev/99-timidity-midi.rules` | udev rule: auto-connect USB MIDI devices to TiMidity in ALSA sequencer mode (`-iA`) |
 | `udev/timidity-midi-connect` | Helper script called by the udev rule, uses `aconnect(1)` to link hardware MIDI ports |
 
@@ -23,6 +25,14 @@ by `make install` — copy and adjust them for your distribution.
 The udev rules are only useful in ALSA sequencer mode (`-iA`). In PipeWire
 MIDI mode (`-ip`), auto-linking of MIDI sources is handled natively by
 TiMidity with the `-ipA` option (e.g. `timidity -ipA -OW`).
+
+## Headless / system-wide PipeWire
+
+The systemd user service assumes the typical per-user PipeWire session. For
+headless setups (e.g. Raspberry Pi) running PipeWire system-wide without a
+user session, use the OpenRC init script instead — it handles
+`XDG_RUNTIME_DIR` and `PULSE_SERVER` environment variables for the system-wide
+PipeWire socket (see `timidity.confd`).
 
 ## Tested configuration
 

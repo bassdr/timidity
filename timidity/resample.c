@@ -33,6 +33,10 @@
 #include <strings.h>
 #endif
 
+#ifdef HAVE_LIBSAMPLERATE
+#include <samplerate.h>
+#endif
+
 #include "timidity.h"
 #include "common.h"
 #include "instrum.h"
@@ -422,6 +426,9 @@ static resample_t resample_buffer[AUDIO_BUFFER_SIZE];
 static int resample_buffer_offset;
 static resample_t *vib_resample_voice(int, int32 *, int);
 static resample_t *normal_resample_voice(int, int32 *, int);
+#ifdef HAVE_LIBSAMPLERATE
+static resample_t *src_resample_voice(int, int32 *);
+#endif
 
 #ifdef PRECALC_LOOPS
 #if SAMPLE_LENGTH_BITS == 32 && TIMIDITY_HAVE_INT64
@@ -1350,6 +1357,11 @@ resample_t *resample_voice(int v, int32 *countptr)
 	return resample_buffer;
     }
 
+#ifdef HAVE_LIBSAMPLERATE
+    if (vp->src_state)
+	return src_resample_voice(v, countptr);
+#endif
+
     mode = vp->sample->modes;
     if((mode & MODES_LOOPING) &&
        ((mode & MODES_ENVELOPE) ||
@@ -1383,6 +1395,283 @@ resample_t *resample_voice(int v, int32 *countptr)
 #endif
     return result;
 }
+
+#ifdef HAVE_LIBSAMPLERATE
+
+/*
+ * libsamplerate-based resampling backend.
+ *
+ * Replaces the per-sample function pointer interpolation with
+ * libsamplerate's block-based processing.  The src_process() API
+ * is used so that we can prepare source data with loop/bidir
+ * handling ourselves, then let SRC do the actual interpolation.
+ */
+
+/* Map TiMidity resampler enum to SRC converter type */
+static int src_converter_type(void)
+{
+    int r = get_current_resampler();
+    switch (r) {
+    case RESAMPLE_NONE:    return SRC_ZERO_ORDER_HOLD;
+    case RESAMPLE_LINEAR:  return SRC_LINEAR;
+    case RESAMPLE_CSPLINE:
+    case RESAMPLE_LAGRANGE: return SRC_SINC_FASTEST;
+    case RESAMPLE_GAUSS:   return SRC_SINC_MEDIUM_QUALITY;
+    case RESAMPLE_NEWTON:  return SRC_SINC_BEST_QUALITY;
+    default:               return SRC_SINC_MEDIUM_QUALITY;
+    }
+}
+
+void src_voice_init(int v)
+{
+    Voice *vp = &voice[v];
+    int err;
+
+    if (vp->src_state)
+	src_delete(vp->src_state);
+
+    vp->src_state = src_new(src_converter_type(), 1, &err);
+    vp->src_bidir_reverse = 0;
+    vp->src_read_ofs = vp->sample_offset;
+
+    if (!vp->src_state)
+	ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
+		  "libsamplerate: src_new failed: %s",
+		  src_strerror(err));
+}
+
+void src_voice_free(int v)
+{
+    Voice *vp = &voice[v];
+    if (vp->src_state) {
+	src_delete(vp->src_state);
+	vp->src_state = NULL;
+    }
+}
+
+/*
+ * Compute the SRC ratio for the current voice state.
+ * ratio = output_rate / effective_input_rate
+ *       = (root_freq * play_mode->rate) / (sample_rate * frequency)
+ *       = (1 << FRACTION_BITS) / abs(sample_increment)
+ */
+static double src_voice_ratio(Voice *vp)
+{
+    int32 incr = vp->sample_increment;
+    if (incr < 0) incr = -incr;
+    if (incr == 0) incr = 1;
+    return (double)(1 << FRACTION_BITS) / (double)incr;
+}
+
+/*
+ * Fill a float source buffer from sample data, handling loop modes.
+ * Returns the number of source frames prepared.
+ *
+ * For plain mode: reads until end of sample, sets *end_of_input=1.
+ * For forward loop: wraps at loop_end back to loop_start.
+ * For bidir loop: reverses direction at loop boundaries.
+ */
+static int src_prepare_source(Voice *vp, float *srcbuf, int max_frames,
+			      int mode, int *end_of_input)
+{
+    sample_t *data = vp->sample->data;
+    splen_t ls = vp->sample->loop_start;
+    splen_t le = vp->sample->loop_end;
+    splen_t dl = vp->sample->data_length;
+    spoff_fixed_t ofs = vp->src_read_ofs;
+    int reverse = vp->src_bidir_reverse;
+    int i, n = 0;
+
+    *end_of_input = 0;
+
+    for (i = 0; i < max_frames; i++) {
+	int32 idx = (int32)(ofs >> FRACTION_BITS);
+
+	if (mode == 1) {
+	    /* plain: no loop */
+	    if (ofs >= dl) {
+		*end_of_input = 1;
+		break;
+	    }
+	} else if (mode == 0) {
+	    /* forward loop */
+	    while (ofs >= le)
+		ofs -= (le - ls);
+	    idx = (int32)(ofs >> FRACTION_BITS);
+	} else {
+	    /* bidir loop */
+	    if (!reverse && ofs >= le) {
+		ofs = (le << 1) - ofs;
+		reverse = 1;
+	    } else if (reverse && ofs <= ls) {
+		ofs = (ls << 1) - ofs;
+		reverse = 0;
+	    }
+	    idx = (int32)(ofs >> FRACTION_BITS);
+	}
+
+	if (idx < 0) idx = 0;
+	if (idx >= (int32)(dl >> FRACTION_BITS))
+	    idx = (int32)(dl >> FRACTION_BITS) - 1;
+
+	srcbuf[n++] = (float)data[idx] / 32768.0f;
+
+	if (reverse)
+	    ofs -= (1 << FRACTION_BITS);
+	else
+	    ofs += (1 << FRACTION_BITS);
+    }
+
+    vp->src_read_ofs = ofs;
+    vp->src_bidir_reverse = reverse;
+    return n;
+}
+
+/*
+ * Main SRC-based resampling entry point.
+ * Called from resample_voice() when libsamplerate is available.
+ */
+static resample_t *src_resample_voice(int v, int32 *countptr)
+{
+    Voice *vp = &voice[v];
+    int32 count = *countptr;
+    resample_t *dest = resample_buffer;
+    int mode;
+    double ratio;
+    int produced = 0;
+    SRC_STATE *state = (SRC_STATE *)vp->src_state;
+
+    /* Determine loop mode (same logic as resample_voice) */
+    mode = vp->sample->modes;
+    if ((mode & MODES_LOOPING) &&
+	((mode & MODES_ENVELOPE) ||
+	 (vp->status & (VOICE_ON | VOICE_SUSTAINED))))
+    {
+	if (mode & MODES_PINGPONG)
+	    mode = 2;	/* bidir */
+	else
+	    mode = 0;	/* forward loop */
+    }
+    else
+	mode = 1;	/* plain */
+
+    if (!state) {
+	/* fallback: SRC init failed, silence */
+	memset(dest, 0, count * sizeof(resample_t));
+	return dest;
+    }
+
+    /*
+     * Process in chunks, updating the SRC ratio for vibrato/portamento.
+     *
+     * Without vibrato: single chunk.
+     * With vibrato: chunk size = vibrato_control_ratio.
+     * With portamento: chunk size = porta_control_ratio.
+     */
+    while (produced < count) {
+	float srcbuf[AUDIO_BUFFER_SIZE];
+	float outbuf[AUDIO_BUFFER_SIZE];
+	SRC_DATA sd;
+	int chunk, src_frames, end_of_input;
+
+	/* Determine chunk size based on vibrato/portamento */
+	chunk = count - produced;
+
+	if (vp->vibrato_control_ratio && vp->vibrato_control_counter > 0) {
+	    if (chunk > vp->vibrato_control_counter)
+		chunk = vp->vibrato_control_counter;
+	}
+	if (vp->porta_control_ratio && vp->porta_control_counter > 0) {
+	    if (chunk > vp->porta_control_counter)
+		chunk = vp->porta_control_counter;
+	}
+
+	ratio = src_voice_ratio(vp);
+
+	/* Estimate source frames needed (with margin for SRC filter) */
+	src_frames = (int)(chunk / ratio) + 32;
+	if (src_frames > AUDIO_BUFFER_SIZE)
+	    src_frames = AUDIO_BUFFER_SIZE;
+
+	src_frames = src_prepare_source(vp, srcbuf, src_frames,
+					mode, &end_of_input);
+
+	sd.data_in = srcbuf;
+	sd.data_out = outbuf;
+	sd.input_frames = src_frames;
+	sd.output_frames = chunk;
+	sd.src_ratio = ratio;
+	sd.end_of_input = end_of_input;
+
+	if (src_process(state, &sd) != 0) {
+	    /* error: fill remaining with silence */
+	    memset(dest + produced, 0,
+		   (count - produced) * sizeof(resample_t));
+	    break;
+	}
+
+	/* Convert float output to resample_t (int32 in int16 range) */
+	{
+	    int j;
+	    int32 s;
+	    for (j = 0; j < sd.output_frames_gen; j++) {
+		s = (int32)(outbuf[j] * 32768.0f);
+		if (s > 32767) s = 32767;
+		else if (s < -32768) s = -32768;
+		dest[produced + j] = s;
+	    }
+	}
+
+	produced += sd.output_frames_gen;
+
+	/* Rewind source position for unconsumed input */
+	{
+	    int unconsumed = src_frames - sd.input_frames_used;
+	    if (unconsumed > 0) {
+		if (vp->src_bidir_reverse)
+		    vp->src_read_ofs += (spoff_fixed_t)unconsumed << FRACTION_BITS;
+		else
+		    vp->src_read_ofs -= (spoff_fixed_t)unconsumed << FRACTION_BITS;
+	    }
+	}
+
+	if (end_of_input && sd.output_frames_gen == 0) {
+	    vp->timeout = 1;
+	    break;
+	}
+
+	/* Update vibrato counter */
+	if (vp->vibrato_control_ratio) {
+	    vp->vibrato_control_counter -= sd.output_frames_gen;
+	    if (vp->vibrato_control_counter <= 0) {
+		vp->vibrato_control_counter = vp->vibrato_control_ratio;
+		recompute_freq(v);
+	    }
+	}
+
+	/* Update portamento counter */
+	if (vp->porta_control_ratio) {
+	    vp->porta_control_counter -= sd.output_frames_gen;
+	    if (vp->porta_control_counter <= 0) {
+		vp->porta_control_counter = vp->porta_control_ratio;
+		recompute_freq(v);
+	    }
+	}
+
+	/* If SRC produced nothing and we didn't end, avoid infinite loop */
+	if (sd.output_frames_gen == 0 && !end_of_input)
+	    break;
+    }
+
+    /* Update voice offset for timing purposes.  Use sample_increment
+     * to keep the synthesis engine's notion of position consistent. */
+    vp->sample_offset = vp->src_read_ofs;
+
+    *countptr = produced;
+    return resample_buffer;
+}
+
+#endif /* HAVE_LIBSAMPLERATE */
 
 void pre_resample(Sample * sp)
 {

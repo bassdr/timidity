@@ -459,6 +459,12 @@ typedef struct {
 #ifdef ENABLE_PAN_DELAY
   int32 *pan_delay_buf, pan_delay_rpt, pan_delay_wpt, pan_delay_spt;
 #endif	/* ENABLE_PAN_DELAY */
+
+#ifdef HAVE_LIBSAMPLERATE
+  void *src_state;		/* SRC_STATE* for libsamplerate */
+  int src_bidir_reverse;	/* bidir loop: currently going backward */
+  spoff_fixed_t src_read_ofs;	/* current read position for SRC callback */
+#endif
 } Voice;
 
 /* Voice status options: */

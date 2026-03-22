@@ -35,7 +35,14 @@ enum {
 	RESAMPLE_GAUSS,
 	RESAMPLE_NEWTON,
 	RESAMPLE_LINEAR,
-	RESAMPLE_NONE
+	RESAMPLE_NONE,
+#ifdef HAVE_LIBSAMPLERATE
+	RESAMPLE_SRC_SINC_BEST,
+	RESAMPLE_SRC_SINC_MEDIUM,
+	RESAMPLE_SRC_SINC_FASTEST,
+	RESAMPLE_SRC_LINEAR,
+	RESAMPLE_SRC_ZOH,
+#endif
 };
 
 extern int get_current_resampler(void);
@@ -54,5 +61,10 @@ extern resample_t do_resamplation(sample_t *src, splen_t ofs, resample_rec_t *re
 
 extern resample_t *resample_voice(int v, int32 *countptr);
 extern void pre_resample(Sample *sp);
+
+#ifdef HAVE_LIBSAMPLERATE
+extern void src_voice_init(int v);
+extern void src_voice_free(int v);
+#endif
 
 #endif /* ___RESAMPLE_H_ */

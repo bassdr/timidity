@@ -2178,6 +2178,28 @@ AC_ARG_ENABLE(spline,
 	;;
     esac ])
 
+dnl Fixed resamplation (compile-time resampler, no runtime switching)
+AC_ARG_ENABLE(fixed-resamplation,
+  AS_HELP_STRING([--enable-fixed-resamplation],
+    [Fix resampler at compile time for better inlining (default is no)]),
+  [ if test "$enableval" = "yes"; then
+      AC_DEFINE(FIXED_RESAMPLATION,1,Define to fix resampler at compile time.)
+    fi ])
+
+dnl libsamplerate (optional high-quality resampling backend)
+AC_ARG_ENABLE(libsamplerate,
+  AS_HELP_STRING([--enable-libsamplerate],
+    [Use libsamplerate for resampling (default is no)]),
+  [ if test "$enableval" = "yes"; then
+      PKG_CHECK_MODULES(SAMPLERATE, samplerate, [
+        AC_DEFINE(HAVE_LIBSAMPLERATE,1,Define to use libsamplerate for resampling.)
+        EXTRALIBS="$EXTRALIBS $SAMPLERATE_LIBS"
+        EXTRADEFS="$EXTRADEFS $SAMPLERATE_CFLAGS"
+      ], [
+        AC_MSG_ERROR([libsamplerate not found (install libsamplerate-dev or samplerate)])
+      ])
+    fi ])
+
 dnl WRD interface
 AC_ARG_ENABLE(wrd,
   AS_HELP_STRING([--enable-wrd], [Enable WRD interface for X      (default is no)]),

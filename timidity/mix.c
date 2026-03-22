@@ -97,7 +97,7 @@ static inline void compute_mix_smoothing(Voice *);
 
 int min_sustain_time = 5000;
 
-static mix_t filter_buffer[AUDIO_BUFFER_SIZE];
+static mix_t filter_buffer[AUDIO_BUFFER_SIZE] __attribute__((aligned(64)));
 
 /**************** interface function ****************/
 void mix_voice(int32 *buf, int v, int32 c)

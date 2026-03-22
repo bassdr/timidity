@@ -422,7 +422,7 @@ int set_current_resampler(int type)
 #define FINALINTERP /* Nothing to do after TiMidity++ 2.9.0 */
 /* So it isn't interpolation. At least it's final. */
 
-static resample_t resample_buffer[AUDIO_BUFFER_SIZE];
+static resample_t resample_buffer[AUDIO_BUFFER_SIZE] __attribute__((aligned(64)));
 static int resample_buffer_offset;
 static resample_t *vib_resample_voice(int, int32 *, int);
 static resample_t *normal_resample_voice(int, int32 *, int);

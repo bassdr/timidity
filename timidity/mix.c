@@ -67,6 +67,67 @@ typedef int32 mix_t;
 	pan_delay_buf[pan_delay_wpt] = (a) * s;	\
 	if (++pan_delay_wpt == PAN_DELAY_BUF_MAX) {pan_delay_wpt = 0;}
 
+#ifdef USE_SIMD_MIXING
+#include <smmintrin.h>
+
+/* SIMD block mix: stereo interleaved output, constant volumes */
+static inline void mix_block_stereo(mix_t *sp, int32 *lp,
+		int32 left, int32 right, int count)
+{
+	__m128i vol = _mm_set_epi32(right, left, right, left);
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		__m128i samples = _mm_loadu_si128((__m128i *)(sp + i));
+		__m128i s01 = _mm_unpacklo_epi32(samples, samples);
+		__m128i s23 = _mm_unpackhi_epi32(samples, samples);
+		__m128i out0 = _mm_loadu_si128((__m128i *)(lp + i * 2));
+		__m128i out1 = _mm_loadu_si128((__m128i *)(lp + i * 2 + 4));
+		_mm_storeu_si128((__m128i *)(lp + i * 2),
+			_mm_add_epi32(out0, _mm_mullo_epi32(s01, vol)));
+		_mm_storeu_si128((__m128i *)(lp + i * 2 + 4),
+			_mm_add_epi32(out1, _mm_mullo_epi32(s23, vol)));
+	}
+	for (; i < count; i++) {
+		lp[i * 2] += left * sp[i];
+		lp[i * 2 + 1] += right * sp[i];
+	}
+}
+
+/* SIMD block mix: single channel, stride-2 output */
+static inline void mix_block_single(mix_t *sp, int32 *lp,
+		int32 left, int count)
+{
+	__m128i vol = _mm_set_epi32(0, left, 0, left);
+	__m128i zero = _mm_setzero_si128();
+	int i = 0;
+	for (; i + 1 < count; i += 2) {
+		__m128i raw = _mm_loadl_epi64((__m128i *)(sp + i));
+		__m128i s = _mm_unpacklo_epi32(raw, zero);
+		__m128i out = _mm_loadu_si128((__m128i *)(lp + i * 2));
+		_mm_storeu_si128((__m128i *)(lp + i * 2),
+			_mm_add_epi32(out, _mm_mullo_epi32(s, vol)));
+	}
+	for (; i < count; i++)
+		lp[i * 2] += left * sp[i];
+}
+
+/* SIMD block mix: mono output, contiguous */
+static inline void mix_block_mono(mix_t *sp, int32 *lp,
+		int32 left, int count)
+{
+	__m128i vol = _mm_set1_epi32(left);
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		__m128i samples = _mm_loadu_si128((__m128i *)(sp + i));
+		__m128i out = _mm_loadu_si128((__m128i *)(lp + i));
+		_mm_storeu_si128((__m128i *)(lp + i),
+			_mm_add_epi32(out, _mm_mullo_epi32(samples, vol)));
+	}
+	for (; i < count; i++)
+		lp[i] += left * sp[i];
+}
+#endif /* USE_SIMD_MIXING */
+
 void mix_voice(int32 *, int, int32);
 static inline int do_voice_filter(int, resample_t*, mix_t*, int32);
 static inline void recalc_voice_resonance(int);
@@ -428,10 +489,15 @@ static inline void mix_mono_signal(
 			vp->old_left_mix = linear_left;
 			cc -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_mono(sp, lp, left, cc);
+			sp += cc; lp += cc;
+#else
 			for (i = 0; i < cc; i++) {
 				s = *sp++;
 				MIXATION(left);
 			}
+#endif
 			cc = control_ratio;
 			if (update_signal(v))
 				/* Envelope ran out */
@@ -466,10 +532,14 @@ static inline void mix_mono_signal(
 			vp->old_left_mix = linear_left;
 			count -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_mono(sp, lp, left, count);
+#else
 			for (i = 0; i < count; i++) {
 				s = *sp++;
 				MIXATION(left);
 			}
+#endif
 			return;
 		}
 }
@@ -516,10 +586,14 @@ static inline void mix_mono(mix_t *sp, int32 *lp, int v, int count)
 		vp->old_left_mix = FROM_FINAL_VOLUME(left);
 	}
 #endif
+#ifdef USE_SIMD_MIXING
+	mix_block_mono(sp, lp, left, count);
+#else
 	for (i = 0; i < count; i++) {
 		s = *sp++;
 		MIXATION(left);
 	}
+#endif
 }
 
 #ifdef ENABLE_PAN_DELAY
@@ -655,11 +729,16 @@ static inline void mix_mystery_signal(
 			cc -= i;
 #endif
 			if(vp->pan_delay_rpt == 0) {
+#ifdef USE_SIMD_MIXING
+				mix_block_stereo(sp, lp, left, right, cc);
+				sp += cc; lp += cc * 2;
+#else
 				for (i = 0; i < cc; i++) {
 					s = *sp++;
 					MIXATION(left);
 					MIXATION(right);
 				}
+#endif
 			} else if(vp->panning < 64) {
 				for (i = 0; i < cc; i++) {
 					s = *sp++;
@@ -786,11 +865,15 @@ static inline void mix_mystery_signal(
 			count -= i;
 #endif
 			if(vp->pan_delay_rpt == 0) {
+#ifdef USE_SIMD_MIXING
+				mix_block_stereo(sp, lp, left, right, count);
+#else
 				for (i = 0; i < count; i++) {
 					s = *sp++;
 					MIXATION(left);
 					MIXATION(right);
 				}
+#endif
 			} else if(vp->panning < 64) {
 				for (i = 0; i < count; i++) {
 					s = *sp++;
@@ -882,11 +965,16 @@ static inline void mix_mystery_signal(
 			vp->old_right_mix = linear_right;
 			cc -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_stereo(sp, lp, left, right, cc);
+			sp += cc; lp += cc * 2;
+#else
 			for (i = 0; i < cc; i++) {
 				s = *sp++;
 				MIXATION(left);
 				MIXATION(right);
 			}
+#endif
 			cc = control_ratio;
 			if (update_signal(v))
 				/* Envelope ran out */
@@ -945,11 +1033,15 @@ static inline void mix_mystery_signal(
 			vp->old_right_mix = linear_right;
 			count -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_stereo(sp, lp, left, right, count);
+#else
 			for (i = 0; i < count; i++) {
 				s = *sp++;
 				MIXATION(left);
 				MIXATION(right);
 			}
+#endif
 			return;
 		}
 }
@@ -1078,11 +1170,15 @@ static inline void mix_mystery(mix_t *sp, int32 *lp, int v, int count)
 	}
 #endif
 	if(vp->pan_delay_rpt == 0) {
+#ifdef USE_SIMD_MIXING
+		mix_block_stereo(sp, lp, left, right, count);
+#else
 		for (i = 0; i < count; i++) {
 			s = *sp++;
 			MIXATION(left);
 			MIXATION(right);
 		}
+#endif
 	} else if(vp->panning < 64) {
 		for (i = 0; i < count; i++) {
 			s = *sp++;
@@ -1163,11 +1259,15 @@ static inline void mix_mystery(mix_t *sp, int32 *lp, int v, int count)
 		vp->old_right_mix = FROM_FINAL_VOLUME(right);
 	}
 #endif
+#ifdef USE_SIMD_MIXING
+	mix_block_stereo(sp, lp, left, right, count);
+#else
 	for (i = 0; i < count; i++) {
 		s = *sp++;
 		MIXATION(left);
 		MIXATION(right);
 	}
+#endif
 }
 #endif	/* ENABLE_PAN_DELAY */
 
@@ -1226,11 +1326,16 @@ static inline void mix_center_signal(
 			vp->old_left_mix = vp->old_right_mix = linear_left;
 			cc -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_stereo(sp, lp, left, left, cc);
+			sp += cc; lp += cc * 2;
+#else
 			for (i = 0; i < cc; i++) {
 				s = *sp++;
 				MIXATION(left);
 				MIXATION(left);
 			}
+#endif
 			cc = control_ratio;
 			if (update_signal(v))
 				/* Envelope ran out */
@@ -1266,11 +1371,15 @@ static inline void mix_center_signal(
 			vp->old_left_mix = vp->old_right_mix = linear_left;
 			count -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_stereo(sp, lp, left, left, count);
+#else
 			for (i = 0; i < count; i++) {
 				s = *sp++;
 				MIXATION(left);
 				MIXATION(left);
 			}
+#endif
 			return;
 		}
 }
@@ -1317,11 +1426,15 @@ static inline void mix_center(mix_t *sp, int32 *lp, int v, int count)
 		vp->old_left_mix = vp->old_right_mix = FROM_FINAL_VOLUME(left);
 	}
 #endif
+#ifdef USE_SIMD_MIXING
+	mix_block_stereo(sp, lp, left, left, count);
+#else
 	for (i = 0; i < count; i++) {
 		s = *sp++;
 		MIXATION(left);
 		MIXATION(left);
 	}
+#endif
 }
 
 #ifdef __BORLANDC__
@@ -1378,11 +1491,16 @@ static inline void mix_single_signal(
 			vp->old_left_mix = linear_left;
 			cc -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_single(sp, lp, left, cc);
+			sp += cc; lp += cc * 2;
+#else
 			for (i = 0; i < cc; i++) {
 				s = *sp++;
 				MIXATION(left);
 				lp++;
 			}
+#endif
 			cc = control_ratio;
 			if (update_signal(v))
 				/* Envelope ran out */
@@ -1418,11 +1536,15 @@ static inline void mix_single_signal(
 			vp->old_left_mix = linear_left;
 			count -= i;
 #endif
+#ifdef USE_SIMD_MIXING
+			mix_block_single(sp, lp, left, count);
+#else
 			for (i = 0; i < count; i++) {
 				s = *sp++;
 				MIXATION(left);
 				lp++;
 			}
+#endif
 			return;
 		}
 }
@@ -1469,11 +1591,15 @@ static inline void mix_single(mix_t *sp, int32 *lp, int v, int count)
 		vp->old_left_mix = FROM_FINAL_VOLUME(left);
 	}
 #endif
+#ifdef USE_SIMD_MIXING
+	mix_block_single(sp, lp, left, count);
+#else
 	for (i = 0; i < count; i++) {
 		s = *sp++;
 		MIXATION(left);
 		lp++;
 	}
+#endif
 }
 
 /* Returns 1 if the note died */

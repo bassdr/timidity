@@ -2217,6 +2217,24 @@ AC_ARG_ENABLE(libsamplerate,
       ])
     fi ])
 
+dnl SIMD-accelerated mixing (SSE4.1 on x86/x86-64)
+AC_ARG_ENABLE(simd-mixing,
+  AS_HELP_STRING([--enable-simd-mixing],
+    [Use SSE4.1 SIMD for mixing and format conversion (default is no)]),
+  [ if test "$enableval" = "yes"; then
+      save_CFLAGS="$CFLAGS"
+      CFLAGS="$CFLAGS -msse4.1"
+      AC_MSG_CHECKING([whether compiler supports SSE4.1 intrinsics])
+      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <smmintrin.h>],
+        [__m128i a = _mm_set1_epi32(1); a = _mm_mullo_epi32(a, a);])],
+        [AC_MSG_RESULT([yes])
+         AC_DEFINE(USE_SIMD_MIXING,1,Define to use SSE4.1 SIMD for mixing and format conversion.)
+         EXTRADEFS="$EXTRADEFS -msse4.1"],
+        [AC_MSG_RESULT([no])
+         AC_MSG_ERROR([SSE4.1 not supported by compiler, cannot enable SIMD mixing])
+         CFLAGS="$save_CFLAGS"])
+    fi ])
+
 dnl WRD interface
 AC_ARG_ENABLE(wrd,
   AS_HELP_STRING([--enable-wrd], [Enable WRD interface for X      (default is no)]),

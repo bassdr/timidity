@@ -37,6 +37,9 @@
 #include "tables.h"
 #include "controls.h"
 #include "audio_cnv.h"
+#ifdef USE_SIMD_MIXING
+#include <smmintrin.h>
+#endif
 
 int audio_buffer_bits = DEFAULT_AUDIO_BUFFER_BITS;
 
@@ -253,8 +256,24 @@ void s32tou8(int32 *lp, int32 c)
 void s32tos16(int32 *lp, int32 c)
 {
   int16 *sp=(int16 *)(lp);
-  int32 l, i;
-
+  int32 i;
+#ifdef USE_SIMD_MIXING
+  const int shift = 32 - 16 - GUARD_BITS;
+  for (i = 0; i + 7 < c; i += 8) {
+    __m128i a = _mm_loadu_si128((__m128i *)(lp + i));
+    __m128i b = _mm_loadu_si128((__m128i *)(lp + i + 4));
+    a = _mm_srai_epi32(a, shift);
+    b = _mm_srai_epi32(b, shift);
+    _mm_storeu_si128((__m128i *)(sp + i), _mm_packs_epi32(a, b));
+  }
+  for (; i < c; i++) {
+    int32 l = lp[i] >> shift;
+    if (l > 32767) l = 32767;
+    else if (l < -32768) l = -32768;
+    sp[i] = (int16)(l);
+  }
+#else
+  int32 l;
   for(i = 0; i < c; i++)
     {
       l=(lp[i])>>(32-16-GUARD_BITS);
@@ -262,6 +281,7 @@ void s32tos16(int32 *lp, int32 c)
       else if (l<-32768) l=-32768;
       sp[i] = (int16)(l);
     }
+#endif
 }
 
 void s32tou16(int32 *lp, int32 c)

@@ -81,13 +81,14 @@ struct midi_msg {
 
 struct midi_ringbuf {
 	struct midi_msg msgs[MIDI_BUF_SIZE];
-	volatile int rdptr;
-	volatile int wrptr;
+	int rdptr;
+	int wrptr;
 };
 
 static inline int midibuf_available(struct midi_ringbuf *rb)
 {
-	return rb->wrptr - rb->rdptr;
+	return __atomic_load_n(&rb->wrptr, __ATOMIC_ACQUIRE)
+	     - __atomic_load_n(&rb->rdptr, __ATOMIC_RELAXED);
 }
 
 static inline int midibuf_empty(struct midi_ringbuf *rb)
@@ -95,31 +96,48 @@ static inline int midibuf_empty(struct midi_ringbuf *rb)
 	return MIDI_BUF_SIZE - midibuf_available(rb);
 }
 
+/*
+ * Push a MIDI message onto the ring buffer (RT thread / producer).
+ * Uses a release store on wrptr so the consumer sees the completed
+ * message data before the updated pointer.
+ */
 static inline void midibuf_push(struct midi_ringbuf *rb,
 				const uint8_t *data, uint32_t len)
 {
+	int wr;
 	struct midi_msg *msg;
 
-	if (midibuf_empty(rb) <= 0 || len == 0 || len > MIDI_MSG_MAX)
+	if (len == 0 || len > MIDI_MSG_MAX)
 		return;
-	msg = &rb->msgs[rb->wrptr % MIDI_BUF_SIZE];
+	wr = __atomic_load_n(&rb->wrptr, __ATOMIC_RELAXED);
+	if (MIDI_BUF_SIZE - (wr - __atomic_load_n(&rb->rdptr, __ATOMIC_ACQUIRE)) <= 0)
+		return;
+	msg = &rb->msgs[wr % MIDI_BUF_SIZE];
 	memcpy(msg->data, data, len);
 	msg->len = len;
-	__sync_synchronize();
-	rb->wrptr++;
+	__atomic_store_n(&rb->wrptr, wr + 1, __ATOMIC_RELEASE);
 }
 
+/*
+ * Peek at the next MIDI message (main thread / consumer).
+ * Uses an acquire load on wrptr to see completed message data.
+ */
 static inline struct midi_msg *midibuf_peek(struct midi_ringbuf *rb)
 {
-	if (midibuf_available(rb) <= 0)
+	int rd = __atomic_load_n(&rb->rdptr, __ATOMIC_RELAXED);
+	if (__atomic_load_n(&rb->wrptr, __ATOMIC_ACQUIRE) - rd <= 0)
 		return NULL;
-	return &rb->msgs[rb->rdptr % MIDI_BUF_SIZE];
+	return &rb->msgs[rd % MIDI_BUF_SIZE];
 }
 
+/*
+ * Pop a message after processing (main thread / consumer).
+ * Uses a release store on rdptr so the producer sees the freed slot.
+ */
 static inline void midibuf_pop(struct midi_ringbuf *rb)
 {
-	__sync_synchronize();
-	rb->rdptr++;
+	int rd = __atomic_load_n(&rb->rdptr, __ATOMIC_RELAXED);
+	__atomic_store_n(&rb->rdptr, rd + 1, __ATOMIC_RELEASE);
 }
 
 static inline void midibuf_clear(struct midi_ringbuf *rb)
@@ -905,8 +923,19 @@ static void doit(void)
 			aq_fill_nonblocking();
 		}
 
-		/* small sleep to avoid busy-waiting */
-		usleep(pwctx.active ? 1000 : 10000);
+		/*
+		 * Sleep to avoid busy-waiting.  When active, scale the
+		 * sleep to half the audio fragment duration so we wake
+		 * well before the next buffer is due.  Cap at 500 µs to
+		 * keep MIDI latency low under all configurations.
+		 */
+		if (pwctx.active) {
+			int us = pwctx.buffer_time_advance * 500000
+				 / play_mode->rate;
+			usleep(us > 500 ? 500 : (us > 0 ? us : 100));
+		} else {
+			usleep(10000);
+		}
 	}
 }
 

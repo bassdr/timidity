@@ -89,14 +89,29 @@ PlayMode dpm = {
 
 struct ringbuf {
 	char *buf;
-	int size;		/* total size in bytes */
+	int size;		/* total size in bytes, always power of 2 */
+	int mask;		/* size - 1, for fast modulo */
 	long rdptr, wrptr;	/* byte offsets (unbounded) */
 };
 
+/* Round up to the next power of 2 (no-op if already power of 2). */
+static int next_power_of_2(int v)
+{
+	v--;
+	v |= v >> 1;
+	v |= v >> 2;
+	v |= v >> 4;
+	v |= v >> 8;
+	v |= v >> 16;
+	return v + 1;
+}
+
 static void ringbuf_init(struct ringbuf *rb, int size)
 {
+	size = next_power_of_2(size);
 	rb->buf = (char *)safe_malloc(size);
 	rb->size = size;
+	rb->mask = size - 1;
 	rb->rdptr = rb->wrptr = 0;
 }
 
@@ -133,7 +148,7 @@ static int ringbuf_read(struct ringbuf *rb, char *dst, int bytes)
 	if (bytes <= 0)
 		return 0;
 
-	off = rb->rdptr % rb->size;
+	off = rb->rdptr & rb->mask;
 	chunk = rb->size - off;
 	if (chunk > bytes)
 		chunk = bytes;
@@ -155,7 +170,7 @@ static int ringbuf_write(struct ringbuf *rb, const char *src, int bytes)
 	if (bytes <= 0)
 		return 0;
 
-	off = rb->wrptr % rb->size;
+	off = rb->wrptr & rb->mask;
 	chunk = rb->size - off;
 	if (chunk > bytes)
 		chunk = bytes;

@@ -6676,7 +6676,8 @@ static void do_compute_data_midi(int32 count)
 	n = count * ((stereo) ? 8 : 4); /* in bytes */
 
 	memset(buffer_pointer, 0, n);
-	memset(insertion_effect_buffer, 0, n);
+	if (opt_insertion_effect)
+		memset(insertion_effect_buffer, 0, n);
 
 	if (opt_reverb_control == 3) {
 		rev_max_delay_out = 0x7fffffff;	/* disable */
@@ -6728,8 +6729,9 @@ static void do_compute_data_midi(int32 count)
 			} else {
 				vpblist[i] = buffer_pointer;
 			}
-			/* clear buffers of drum-part effect */
+			/* set up and clear buffers of drum-part effect */
 			if (opt_drum_effect && ISDRUMCHANNEL(i)) {
+				make_drum_effect(i);
 				for (j = 0; j < channel[i].drum_effect_num; j++) {
 					if (channel[i].drum_effect[j].buf != NULL) {
 						memset(channel[i].drum_effect[j].buf, 0, n);
@@ -6750,7 +6752,6 @@ static void do_compute_data_midi(int32 count)
 				flag = 0;
 				ch = voice[i].channel;
 				if (opt_drum_effect && ISDRUMCHANNEL(ch)) {
-					make_drum_effect(ch);
 					note = voice[i].note;
 					for (j = 0; j < channel[ch].drum_effect_num; j++) {
 						if (channel[ch].drum_effect[j].note == note) {

@@ -2449,7 +2449,7 @@ static void finish_note(int i)
 	}
     else
     {
-		if(current_file_info->pcm_mode != PCM_MODE_NON)
+		if(current_file_info && current_file_info->pcm_mode != PCM_MODE_NON)
 		{
 			free_voice(i);
 			ctl_note_event(i);
@@ -3373,10 +3373,12 @@ int midi_drumpart_change(int ch, int isdrum)
 		return 0;
 	if (isdrum) {
 		SET_CHANNELMASK(drumchannels, ch);
-		SET_CHANNELMASK(current_file_info->drumchannels, ch);
+		if (current_file_info)
+			SET_CHANNELMASK(current_file_info->drumchannels, ch);
 	} else {
 		UNSET_CHANNELMASK(drumchannels, ch);
-		UNSET_CHANNELMASK(current_file_info->drumchannels, ch);
+		if (current_file_info)
+			UNSET_CHANNELMASK(current_file_info->drumchannels, ch);
 	}
 	return 1;
 }
@@ -6533,16 +6535,19 @@ static int apply_controls(void)
 	    if(midi_restart_time == -1)
 		midi_restart_time = current_sample;
 	    SET_CHANNELMASK(drumchannel_mask, val);
-	    SET_CHANNELMASK(current_file_info->drumchannel_mask, val);
+	    if (current_file_info)
+		SET_CHANNELMASK(current_file_info->drumchannel_mask, val);
 	    if(IS_SET_CHANNELMASK(drumchannels, val))
 	    {
 		UNSET_CHANNELMASK(drumchannels, val);
-		UNSET_CHANNELMASK(current_file_info->drumchannels, val);
+		if (current_file_info)
+		    UNSET_CHANNELMASK(current_file_info->drumchannels, val);
 	    }
 	    else
 	    {
 		SET_CHANNELMASK(drumchannels, val);
-		SET_CHANNELMASK(current_file_info->drumchannels, val);
+		if (current_file_info)
+		    SET_CHANNELMASK(current_file_info->drumchannels, val);
 	    }
 	    aq_flush(1);
 	    return RC_RELOAD;
@@ -7058,6 +7063,10 @@ static void do_compute_data_aiff(int32 count)
 
 static void do_compute_data(int32 count)
 {
+    if (!current_file_info) {
+    	do_compute_data_midi(count);
+    	return;
+    }
     switch(current_file_info->pcm_mode)
     {
       case PCM_MODE_NON:

@@ -95,3 +95,7 @@ Two new modules add native PipeWire support:
 - **`interface/pipewire_c.c`** — MIDI synthesizer interface (`-ip`, id `'p'`, define `IA_PIPEWIRESYN`). Uses `pw_filter` with a MIDI sink port. Appears as "TiMidity MIDI Sink" in the PipeWire graph. Handles Note On/Off, CC, Program Change, Pitch Bend, Channel/Key Pressure, SysEx.
 
 Both require `libpipewire-0.3` (pkg-config).
+
+## Future: Multithreaded Voice Mixing
+
+A promising future optimization would be parallelizing voice mixing across CPU cores. Currently, `do_compute_data()` in `playmidi.c` mixes all active voices sequentially into a shared buffer. Since each voice's resample→filter→mix pipeline is independent (they only accumulate into the output buffer), voices could be mixed in parallel using worker threads, with each thread accumulating into a thread-local buffer and summing at the end. This would benefit dense MIDI files (many simultaneous voices) on multi-core systems. The main challenges are: thread pool lifecycle management, ensuring the per-voice pipeline remains lock-free, and the final buffer reduction step. The effects chain (reverb, chorus) that runs after all voices are mixed remains single-threaded.

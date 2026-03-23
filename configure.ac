@@ -166,6 +166,17 @@ if test "x$NOCFLAGS" = "xyes"; then
   fi
 fi
 
+dnl Legacy code uses K&R-style function pointer casts (e.g. in GTK and X11
+dnl interfaces) which are errors under C23.  Pin to gnu17 so that GCC 14+
+dnl (which defaults to -std=gnu23) does not reject them.
+AC_MSG_CHECKING([whether $CC supports -std=gnu17])
+save_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -std=gnu17"
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM()],
+  [AC_MSG_RESULT([yes])],
+  [AC_MSG_RESULT([no])
+   CFLAGS="$save_CFLAGS"])
+
 # Checks for target dependencies
 
 AC_ARG_WITH(elf,
@@ -429,12 +440,18 @@ fi
 dnl End of X configure
 
 # Checks for header files.
-AC_HEADER_STDC
-#AC_HEADER_STDBOOL
-AC_HEADER_SYS_WAIT
-if test "x$WATCOM_C" != xyes ; then
-AC_HEADER_TIME
-fi
+dnl AC_HEADER_STDC, AC_HEADER_TIME, and AC_HEADER_SYS_WAIT are deprecated
+dnl in autoconf 2.70+ and generate unquoted shell tests that break on
+dnl modern systems.  All contemporary C toolchains provide standard headers,
+dnl so define STDC_HEADERS unconditionally and use AC_CHECK_HEADERS for the
+dnl rest.
+AC_DEFINE([STDC_HEADERS], [1],
+  [Define to 1 because all modern systems provide ANSI C headers.])
+AC_CHECK_HEADERS([sys/wait.h sys/time.h])
+dnl TIME_WITH_SYS_TIME was set by the old AC_HEADER_TIME; it means
+dnl time.h and sys/time.h can both be included.  Always true on POSIX.
+AC_DEFINE([TIME_WITH_SYS_TIME], [1],
+  [Define to 1 because time.h and sys/time.h can be included together.])
 AC_HEADER_DIRENT
 AC_CHECK_HEADERS( \
   [arpa/inet.h \

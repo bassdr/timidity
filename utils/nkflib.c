@@ -2230,8 +2230,7 @@ mime_getc(SFILE *f)
 }
 
 int
-mime_ungetc(c) 
-unsigned int   c;
+mime_ungetc(unsigned int c)
 {
     Fifo(mime_last++) = c;
     return c;

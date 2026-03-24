@@ -166,17 +166,6 @@ if test "x$NOCFLAGS" = "xyes"; then
   fi
 fi
 
-dnl Legacy code uses K&R-style function pointer casts (e.g. in GTK and X11
-dnl interfaces) which are errors under C23.  Pin to gnu17 so that GCC 14+
-dnl (which defaults to -std=gnu23) does not reject them.
-AC_MSG_CHECKING([whether $CC supports -std=gnu17])
-save_CFLAGS="$CFLAGS"
-CFLAGS="$CFLAGS -std=gnu17"
-AC_COMPILE_IFELSE([AC_LANG_PROGRAM()],
-  [AC_MSG_RESULT([yes])],
-  [AC_MSG_RESULT([no])
-   CFLAGS="$save_CFLAGS"])
-
 # Checks for target dependencies
 
 AC_ARG_WITH(elf,

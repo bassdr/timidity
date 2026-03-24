@@ -82,18 +82,22 @@ static GtkTooltips *ttip;
 static int file_number_to_play; /* Number of the file we're playing in the list */
 static int max_sec, is_quitting = 0, locating = 0, local_adjust = 0;
 
+/* GtkItemFactoryCallback is void(*)(void) but callbacks receive
+ * (GtkWidget*, gpointer) — cast to satisfy C23 strict typing. */
+#define IFC(f) ((GtkItemFactoryCallback)(f))
+
 static GtkItemFactoryEntry ife[] = {
-    {"/File/Open", "<control>O", open_file_cb, 0, NULL},
+    {"/File/Open", "<control>O", IFC(open_file_cb), 0, NULL},
     {"/File/sep", NULL, NULL, 0, "<Separator>"},
-    {"/File/Load Playlist", "<control>L", playlist_cb,
+    {"/File/Load Playlist", "<control>L", IFC(playlist_cb),
      'l', NULL},
-    {"/File/Save Playlist", "<control>S", playlist_cb,
+    {"/File/Save Playlist", "<control>S", IFC(playlist_cb),
      's', NULL},
     {"/File/sep", NULL, NULL, 0, "<Separator>"},
-    {"/File/Quit", "<control>Q", generic_cb, GTK_QUIT, NULL},
+    {"/File/Quit", "<control>Q", IFC(generic_cb), GTK_QUIT, NULL},
     {"/Options/Auto next", "<control>A", NULL, 0, "<CheckItem>"},
-    {"/Options/Show tooltips", "<control>T", tt_toggle_cb, 0, "<CheckItem>"},
-    {"/Options/Clear All", "<control>C", clear_all_cb, 0, NULL}
+    {"/Options/Show tooltips", "<control>T", IFC(tt_toggle_cb), 0, "<CheckItem>"},
+    {"/Options/Clear All", "<control>C", IFC(clear_all_cb), 0, NULL}
 };
 
 #ifdef HAVE_GTK_2

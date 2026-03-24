@@ -540,14 +540,17 @@ static int RedrawText(Drawable drawable, int x,int y,int width,int height)
 	if((prevattr&~CATTR_LPART)!=(curattr&~CATTR_LPART)){
 	  XFontStruct *f=NULL;
 	  int lbearing,ascent;
-	  int (*DrawStringFunc)();
-	  DrawStringFunc=XDrawString;
+	  /* XDrawString, XDrawString16, DrawReverseString, DrawReverseString16
+	   * all share this signature (string type varies, use void*). */
+	  typedef int (*DrawStringFunc_t)(Display*, Drawable, GC, int, int, const void*, int);
+	  DrawStringFunc_t DrawStringFunc;
+	  DrawStringFunc=(DrawStringFunc_t)XDrawString;
 	  line[pos]=0;
 	  if(prevattr<0){
 	    DrawStringFunc=NULL;
 	  }else if(prevattr&CATTR_16FONT){
 	    f=mywin.f16;
-	    DrawStringFunc=XDrawString16;
+	    DrawStringFunc=(DrawStringFunc_t)XDrawString16;
 	    pos/=2;
 	  }else
 	    f=mywin.f8;
@@ -563,7 +566,7 @@ static int RedrawText(Drawable drawable, int x,int y,int width,int height)
   	    }else if(prevattr&CATTR_BGCOLORED){
   	      int tcol;
   	      tcol=(prevattr&CATTR_TXTCOL_MASK)>>CATTR_TXTCOL_MASK_SHIFT;
-	      DrawStringFunc=(DrawStringFunc==XDrawString)?(int(*)())DrawReverseString:(int(*)())DrawReverseString16;
+	      DrawStringFunc=(DrawStringFunc==(DrawStringFunc_t)XDrawString)?(DrawStringFunc_t)DrawReverseString:(DrawStringFunc_t)DrawReverseString16;
 	      XSetForeground(mywin.d,mywin.gc,
 			     mywin.txtcolor[tcol].pixel);
 	    }
@@ -1353,7 +1356,8 @@ void x_Gline(int *params,int nparam)
 void x_GCircle(int *params,int nparam)
 {
   int pad=0;
-  int (*Linefunc)();
+  typedef int (*ArcFunc_t)(Display*, Drawable, GC, int, int, unsigned int, unsigned int, int, int);
+  ArcFunc_t Linefunc;
   Linefunc=XDrawArc;
   if(nparam>=5){
     switch(params[4]){

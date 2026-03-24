@@ -33,6 +33,10 @@
 #include <strings.h>
 #endif
 
+#ifdef USE_SIMD_MIXING
+#include <smmintrin.h>
+#endif
+
 #include "timidity.h"
 #include "common.h"
 #include "instrum.h"
@@ -190,38 +194,43 @@ static resample_t resample_gauss(sample_t *src, splen_t ofs, resample_rec_t *rec
 	sptr = src + left - (gauss_n>>1);
 	gptr = gauss_table[ofs&FRACTION_MASK];
 	if (gauss_n == DEFAULT_GAUSS_ORDER) {
-	    /* expanding the loop for the default case.
-	     * this will allow intensive optimization when compiled
-	     * with SSE2 capability.
-	     */
-#define do_gauss  y += *(sptr++) * *(gptr++);
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    do_gauss;
-	    y += *sptr * *gptr;
-#undef do_gauss
+	    /* 26-element dot product (int16 * float).
+	     * 24 elements via SSE4.1, 2 scalar remainder. */
+#ifdef USE_SIMD_MIXING
+	    {
+		__m128 acc0 = _mm_setzero_ps();
+		__m128 acc1 = _mm_setzero_ps();
+		int si;
+		for (si = 0; si < 24; si += 8) {
+		    __m128i s0 = _mm_cvtepi16_epi32(
+			_mm_loadl_epi64((__m128i *)(sptr + si)));
+		    acc0 = _mm_add_ps(acc0, _mm_mul_ps(
+			_mm_cvtepi32_ps(s0),
+			_mm_loadu_ps(gptr + si)));
+		    __m128i s1 = _mm_cvtepi16_epi32(
+			_mm_loadl_epi64((__m128i *)(sptr + si + 4)));
+		    acc1 = _mm_add_ps(acc1, _mm_mul_ps(
+			_mm_cvtepi32_ps(s1),
+			_mm_loadu_ps(gptr + si + 4)));
+		}
+		acc0 = _mm_add_ps(acc0, acc1);
+		/* horizontal sum */
+		acc0 = _mm_add_ps(acc0,
+		    _mm_shuffle_ps(acc0, acc0, _MM_SHUFFLE(1,0,3,2)));
+		acc0 = _mm_add_ss(acc0,
+		    _mm_shuffle_ps(acc0, acc0, _MM_SHUFFLE(2,3,0,1)));
+		y = _mm_cvtss_f32(acc0);
+		/* 2 remaining elements */
+		y += sptr[24] * gptr[24];
+		y += sptr[25] * gptr[25];
+	    }
+#else
+	    {
+		int si;
+		for (si = 0; si < 26; si++)
+		    y += sptr[si] * gptr[si];
+	    }
+#endif /* USE_SIMD_MIXING */
 	} else {
 	    gend = gptr + gauss_n;
 	    do {

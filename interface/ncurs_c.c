@@ -2902,7 +2902,7 @@ static int ctl_write(char *valp, int32 size)
 }
 
 #if defined(USE_PDCURSES) && !defined(HAVE_VWPRINTW)
-static void vwprintw(WINDOW *w, char *fmt, va_list ap)
+static void vw_printw(WINDOW *w, char *fmt, va_list ap)
 {
     char *buff;
     MBlockList pool;
@@ -2974,7 +2974,7 @@ static int cmsg(int type, int verbosity_level, char *fmt, ...)
 	    switch(type)
 	    {
 	      default:
-		vwprintw(msgwin, fmt, ap);
+		vw_printw(msgwin, fmt, ap);
 		wprintw(msgwin, "\n");
 		if(ctl_ncurs_mode == NCURS_MODE_MAIN)
 		    wrefresh(msgwin);
@@ -2982,7 +2982,7 @@ static int cmsg(int type, int verbosity_level, char *fmt, ...)
 
 	      case CMSG_WARNING:
 		wattron(msgwin, A_BOLD);
-		vwprintw(msgwin, fmt, ap);
+		vw_printw(msgwin, fmt, ap);
 		wprintw(msgwin, "\n");
 		wattroff(msgwin, A_BOLD);
 		if(ctl_ncurs_mode == NCURS_MODE_MAIN)
@@ -2992,7 +2992,7 @@ static int cmsg(int type, int verbosity_level, char *fmt, ...)
 	      case CMSG_ERROR:
 	      case CMSG_FATAL:
 		wattron(msgwin, A_REVERSE);
-		vwprintw(msgwin, fmt, ap);
+		vw_printw(msgwin, fmt, ap);
 		wprintw(msgwin, "\n");
 		wattroff(msgwin, A_REVERSE);
 		if(ctl_ncurs_mode == NCURS_MODE_MAIN)

@@ -60,7 +60,6 @@
 #include "aq.h"
 #include "freq.h"
 #include "quantity.h"
-#include "resample.h"
 
 extern int convert_mod_to_midi_file(MidiEvent * ev);
 
@@ -1823,10 +1822,6 @@ void free_voice(int v1)
 {
     int v2;
 
-#ifdef HAVE_LIBSAMPLERATE
-    src_voice_free(v1);
-#endif
-
 #ifdef ENABLE_PAN_DELAY
 	if (voice[v1].pan_delay_buf != NULL) {
 		free(voice[v1].pan_delay_buf);
@@ -2405,10 +2400,6 @@ static void start_note(MidiEvent *e, int i, int vid, int cnt)
     }
   recompute_freq(i);
   recompute_voice_filter(i);
-
-#ifdef HAVE_LIBSAMPLERATE
-  src_voice_init(i);
-#endif
 
   recompute_amp(i);
   /* initialize volume envelope */

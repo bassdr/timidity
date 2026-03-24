@@ -2203,20 +2203,6 @@ AC_ARG_ENABLE(fixed-resamplation,
       AC_DEFINE(FIXED_RESAMPLATION,1,Define to fix resampler at compile time.)
     fi ])
 
-dnl libsamplerate (optional high-quality resampling backend)
-AC_ARG_ENABLE(libsamplerate,
-  AS_HELP_STRING([--enable-libsamplerate],
-    [Use libsamplerate for resampling (default is no)]),
-  [ if test "$enableval" = "yes"; then
-      PKG_CHECK_MODULES(SAMPLERATE, samplerate, [
-        AC_DEFINE(HAVE_LIBSAMPLERATE,1,Define to use libsamplerate for resampling.)
-        EXTRALIBS="$EXTRALIBS $SAMPLERATE_LIBS"
-        EXTRADEFS="$EXTRADEFS $SAMPLERATE_CFLAGS"
-      ], [
-        AC_MSG_ERROR([libsamplerate not found (install libsamplerate-dev or samplerate)])
-      ])
-    fi ])
-
 dnl SIMD-accelerated mixing (SSE4.1 on x86/x86-64)
 AC_ARG_ENABLE(simd-mixing,
   AS_HELP_STRING([--enable-simd-mixing],

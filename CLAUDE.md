@@ -96,6 +96,11 @@ Two new modules add native PipeWire support:
 
 Both require `libpipewire-0.3` (pkg-config).
 
-## Future: Multithreaded Voice Mixing
+## Why Not Multithreaded Voice Mixing
 
-A promising future optimization would be parallelizing voice mixing across CPU cores. Currently, `do_compute_data()` in `playmidi.c` mixes all active voices sequentially into a shared buffer. Since each voice's resample→filter→mix pipeline is independent (they only accumulate into the output buffer), voices could be mixed in parallel using worker threads, with each thread accumulating into a thread-local buffer and summing at the end. This would benefit dense MIDI files (many simultaneous voices) on multi-core systems. The main challenges are: thread pool lifecycle management, ensuring the per-voice pipeline remains lock-free, and the final buffer reduction step. The effects chain (reverb, chorus) that runs after all voices are mixed remains single-threaded.
+Parallelizing voice mixing was considered but rejected. The per-voice pipeline (resample→filter→mix) looks independent but shares too much mutable state:
+
+- **Shared static buffers**: `resample_buffer` (`resample.c:430`) and `filter_buffer` (`mix.c:161`) are single static arrays reused by every voice call. Parallelism would require per-thread copies.
+- **Side effects in the mix loop**: `free_voice()` is called from within `mix_voice()` (on `VOICE_DIE`), mutating global `voice[]` state and freeing memory. `ctl_note_event()` (UI notification) is also called inline.
+- **Channel buffer routing races**: In the DSP effects path, multiple voices on the same MIDI channel accumulate into the same `vpblist[ch]` buffer. In the non-DSP path, non-reverb voices all target `buffer_pointer`. Concurrent writes would race.
+- **Small payoff**: `AUDIO_BUFFER_SIZE` (~4096 samples, 32KB stereo) fits in L1. SIMD already accelerates the inner loops. Thread synchronization overhead (barrier per ~5ms audio buffer) would likely dominate for typical voice counts.

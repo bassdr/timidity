@@ -407,7 +407,7 @@ typedef double FLOAT_T;
 #define AUDIO_BUFFER_SIZE (1<<AUDIO_BUFFER_BITS)
 
 /* These affect general volume */
-#define GUARD_BITS 3
+#define GUARD_BITS 4
 #define AMP_BITS (15-GUARD_BITS)
 
 #define MAX_AMPLIFICATION 800

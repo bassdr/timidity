@@ -61,6 +61,7 @@ static void ns_shaping16_trad(int32 *, int32);
 static void do_soft_clipping1(int32 *, int32);
 static void do_soft_clipping2(int32 *, int32);
 static void ns_shaping16_9(int32 *, int32);
+static void ns_dither24(int32 *, int32);
 static inline unsigned long frand(void);
 static inline int32 my_mod(int32, int32);
 
@@ -288,7 +289,8 @@ void do_effect(int32 *buf, int32 count)
 	/* L/R Delay */
 	effect_left_right_delay(buf, count);
 	/* Noise shaping filter must apply at last */
-	if (play_mode->encoding & PE_24BIT) {}
+	if (play_mode->encoding & PE_24BIT)
+		ns_dither24(buf, count);
 	else if (! (play_mode->encoding & (PE_16BIT | PE_ULAW | PE_ALAW)))
 		ns_shaping8(buf, count);
 	else if (play_mode->encoding & PE_16BIT)
@@ -518,6 +520,42 @@ static void ns_shaping16_9(int32 *lp, int32 c)
 				+ ((ns9_r1r - ns9_r2r) >> 30);
 		ns9_histposr = my_mod((ns9_histposr + 8), ns9_order);
 		ns9_ehr[ns9_histposr + 9] = ns9_ehr[ns9_histposr] = output - sample;
+		lp[i] = output;
+	}
+}
+
+/* TPDF dither for 24-bit output.
+ * Truncation discards (32 - 24 - GUARD_BITS) bits.
+ * Add triangular dither at that level to decorrelate quantization error. */
+static void ns_dither24(int32 *lp, int32 c)
+{
+	static uint32 r1l, r2l, r1r, r2r;
+	const int shift = 32 - 24 - GUARD_BITS;
+	int32 i, sample, l, output;
+
+	if (!(play_mode->encoding & PE_MONO))
+		c *= 2;
+	for (i = 0; i < c; i++) {
+		/* left channel */
+		r2l = r1l;
+		r1l = genrand_int32();
+		sample = lp[i];
+		sample = (sample > NS_AMP_MAX) ? NS_AMP_MAX
+				: (sample < NS_AMP_MIN) ? NS_AMP_MIN : sample;
+		l = sample >> shift;
+		output = (l << shift) + (int32)((r1l - r2l) >> (32 - shift));
+		lp[i] = output;
+		if (play_mode->encoding & PE_MONO)
+			continue;
+		/* right channel */
+		i++;
+		r2r = r1r;
+		r1r = genrand_int32();
+		sample = lp[i];
+		sample = (sample > NS_AMP_MAX) ? NS_AMP_MAX
+				: (sample < NS_AMP_MIN) ? NS_AMP_MIN : sample;
+		l = sample >> shift;
+		output = (l << shift) + (int32)((r1r - r2r) >> (32 - shift));
 		lp[i] = output;
 	}
 }

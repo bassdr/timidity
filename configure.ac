@@ -2159,7 +2159,7 @@ AM_CONDITIONAL(ENABLE_SOUND_SPEC, test "x$enable_spectrogram" = "xyes")
 dnl Wave Spline Interpolations
 AC_ARG_ENABLE(spline,
   AS_HELP_STRING([--enable-spline=[method]],
-    [Specify spline method.  one of no,linear,cubic,lagrange,newton,gauss (default is linear)]),
+    [Specify spline method.  one of no,linear,cubic,lagrange,newton,gauss (default is gauss)]),
   [ case "x$enableval" in
       xlinear)
         AC_DEFINE(DEFAULT_RESAMPLATION,resample_linear,Define resampler.)

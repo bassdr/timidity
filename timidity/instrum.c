@@ -89,7 +89,7 @@ int default_program[MAX_CHANNELS];
 
 char *default_instrument_name = NULL;
 
-int antialiasing_allowed=0;
+int antialiasing_allowed=1;
 #ifdef FAST_DECAY
 int fast_decay=1;
 #else

@@ -68,12 +68,32 @@ typedef int32 mix_t;
 	if (++pan_delay_wpt == PAN_DELAY_BUF_MAX) {pan_delay_wpt = 0;}
 
 #ifdef USE_SIMD_MIXING
+#ifdef USE_NEON
+#include <arm_neon.h>
+#else
 #include <smmintrin.h>
+#endif
 
 /* SIMD block mix: stereo interleaved output, constant volumes */
 static inline void mix_block_stereo(mix_t *sp, int32 *lp,
 		int32 left, int32 right, int count)
 {
+#ifdef USE_NEON
+	int32x4_t vol_lr = {left, right, left, right};
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		int32x4_t samples = vld1q_s32(sp + i);
+		/* duplicate each sample for L/R: [s0,s0,s1,s1] [s2,s2,s3,s3] */
+		int32x2_t lo = vget_low_s32(samples);
+		int32x2_t hi = vget_high_s32(samples);
+		int32x4_t s01 = vcombine_s32(vzip1_s32(lo, lo), vzip2_s32(lo, lo));
+		int32x4_t s23 = vcombine_s32(vzip1_s32(hi, hi), vzip2_s32(hi, hi));
+		int32x4_t out0 = vld1q_s32(lp + i * 2);
+		int32x4_t out1 = vld1q_s32(lp + i * 2 + 4);
+		vst1q_s32(lp + i * 2, vaddq_s32(out0, vmulq_s32(s01, vol_lr)));
+		vst1q_s32(lp + i * 2 + 4, vaddq_s32(out1, vmulq_s32(s23, vol_lr)));
+	}
+#else
 	__m128i vol = _mm_set_epi32(right, left, right, left);
 	int i = 0;
 	for (; i + 3 < count; i += 4) {
@@ -87,6 +107,7 @@ static inline void mix_block_stereo(mix_t *sp, int32 *lp,
 		_mm_storeu_si128((__m128i *)(lp + i * 2 + 4),
 			_mm_add_epi32(out1, _mm_mullo_epi32(s23, vol)));
 	}
+#endif
 	for (; i < count; i++) {
 		lp[i * 2] += left * sp[i];
 		lp[i * 2 + 1] += right * sp[i];
@@ -97,6 +118,18 @@ static inline void mix_block_stereo(mix_t *sp, int32 *lp,
 static inline void mix_block_single(mix_t *sp, int32 *lp,
 		int32 left, int count)
 {
+#ifdef USE_NEON
+	int32x4_t vol = {left, 0, left, 0};
+	int i = 0;
+	for (; i + 1 < count; i += 2) {
+		int32x2_t raw = vld1_s32(sp + i);
+		/* interleave with zeros: [s0, 0, s1, 0] */
+		int32x4_t s = vcombine_s32(vzip1_s32(raw, vdup_n_s32(0)),
+					   vzip2_s32(raw, vdup_n_s32(0)));
+		int32x4_t out = vld1q_s32(lp + i * 2);
+		vst1q_s32(lp + i * 2, vaddq_s32(out, vmulq_s32(s, vol)));
+	}
+#else
 	__m128i vol = _mm_set_epi32(0, left, 0, left);
 	__m128i zero = _mm_setzero_si128();
 	int i = 0;
@@ -107,6 +140,7 @@ static inline void mix_block_single(mix_t *sp, int32 *lp,
 		_mm_storeu_si128((__m128i *)(lp + i * 2),
 			_mm_add_epi32(out, _mm_mullo_epi32(s, vol)));
 	}
+#endif
 	for (; i < count; i++)
 		lp[i * 2] += left * sp[i];
 }
@@ -115,6 +149,15 @@ static inline void mix_block_single(mix_t *sp, int32 *lp,
 static inline void mix_block_mono(mix_t *sp, int32 *lp,
 		int32 left, int count)
 {
+#ifdef USE_NEON
+	int32x4_t vol = vdupq_n_s32(left);
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		int32x4_t samples = vld1q_s32(sp + i);
+		int32x4_t out = vld1q_s32(lp + i);
+		vst1q_s32(lp + i, vaddq_s32(out, vmulq_s32(samples, vol)));
+	}
+#else
 	__m128i vol = _mm_set1_epi32(left);
 	int i = 0;
 	for (; i + 3 < count; i += 4) {
@@ -123,6 +166,7 @@ static inline void mix_block_mono(mix_t *sp, int32 *lp,
 		_mm_storeu_si128((__m128i *)(lp + i),
 			_mm_add_epi32(out, _mm_mullo_epi32(samples, vol)));
 	}
+#endif
 	for (; i < count; i++)
 		lp[i] += left * sp[i];
 }

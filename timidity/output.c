@@ -38,7 +38,11 @@
 #include "controls.h"
 #include "audio_cnv.h"
 #ifdef USE_SIMD_MIXING
+#ifdef USE_NEON
+#include <arm_neon.h>
+#else
 #include <smmintrin.h>
+#endif
 #endif
 
 int audio_buffer_bits = DEFAULT_AUDIO_BUFFER_BITS;
@@ -259,6 +263,17 @@ void s32tos16(int32 *lp, int32 c)
   int32 i;
 #ifdef USE_SIMD_MIXING
   const int shift = 32 - 16 - GUARD_BITS;
+#ifdef USE_NEON
+  for (i = 0; i + 7 < c; i += 8) {
+    int32x4_t a = vld1q_s32(lp + i);
+    int32x4_t b = vld1q_s32(lp + i + 4);
+    a = vshrq_n_s32(a, 32 - 16 - GUARD_BITS);
+    b = vshrq_n_s32(b, 32 - 16 - GUARD_BITS);
+    int16x4_t lo = vqmovn_s32(a);
+    int16x4_t hi = vqmovn_s32(b);
+    vst1q_s16(sp + i, vcombine_s16(lo, hi));
+  }
+#else
   for (i = 0; i + 7 < c; i += 8) {
     __m128i a = _mm_loadu_si128((__m128i *)(lp + i));
     __m128i b = _mm_loadu_si128((__m128i *)(lp + i + 4));
@@ -266,6 +281,7 @@ void s32tos16(int32 *lp, int32 c)
     b = _mm_srai_epi32(b, shift);
     _mm_storeu_si128((__m128i *)(sp + i), _mm_packs_epi32(a, b));
   }
+#endif
   for (; i < c; i++) {
     int32 l = lp[i] >> shift;
     if (l > 32767) l = 32767;

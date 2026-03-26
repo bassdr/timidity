@@ -2192,22 +2192,38 @@ AC_ARG_ENABLE(fixed-resamplation,
       AC_DEFINE(FIXED_RESAMPLATION,1,Define to fix resampler at compile time.)
     fi ])
 
-dnl SIMD-accelerated mixing (SSE4.1 on x86/x86-64)
+dnl SIMD-accelerated mixing (SSE4.1 on x86/x86-64, NEON on ARM)
 AC_ARG_ENABLE(simd-mixing,
   AS_HELP_STRING([--enable-simd-mixing],
-    [Use SSE4.1 SIMD for mixing and format conversion (default is no)]),
+    [Use SIMD for mixing and resampling (SSE4.1 or NEON) (default is no)]),
   [ if test "$enableval" = "yes"; then
+      simd_found=no
+      dnl Try SSE4.1 first (x86/x86-64)
       save_CFLAGS="$CFLAGS"
       CFLAGS="$CFLAGS -msse4.1"
       AC_MSG_CHECKING([whether compiler supports SSE4.1 intrinsics])
       AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <smmintrin.h>],
         [__m128i a = _mm_set1_epi32(1); a = _mm_mullo_epi32(a, a);])],
         [AC_MSG_RESULT([yes])
-         AC_DEFINE(USE_SIMD_MIXING,1,Define to use SSE4.1 SIMD for mixing and format conversion.)
-         EXTRADEFS="$EXTRADEFS -msse4.1"],
+         AC_DEFINE(USE_SIMD_MIXING,1,Define to use SIMD for mixing and resampling.)
+         EXTRADEFS="$EXTRADEFS -msse4.1"
+         simd_found=yes],
         [AC_MSG_RESULT([no])
-         AC_MSG_ERROR([SSE4.1 not supported by compiler, cannot enable SIMD mixing])
          CFLAGS="$save_CFLAGS"])
+      dnl Try NEON (ARM/AArch64)
+      if test "$simd_found" = "no"; then
+        AC_MSG_CHECKING([whether compiler supports ARM NEON intrinsics])
+        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <arm_neon.h>],
+          [int32x4_t a = vdupq_n_s32(1); a = vmulq_s32(a, a);])],
+          [AC_MSG_RESULT([yes])
+           AC_DEFINE(USE_SIMD_MIXING,1,Define to use SIMD for mixing and resampling.)
+           AC_DEFINE(USE_NEON,1,Define to use ARM NEON SIMD.)
+           simd_found=yes],
+          [AC_MSG_RESULT([no])])
+      fi
+      if test "$simd_found" = "no"; then
+        AC_MSG_ERROR([Neither SSE4.1 nor NEON supported by compiler, cannot enable SIMD mixing])
+      fi
     fi ])
 
 dnl WRD interface

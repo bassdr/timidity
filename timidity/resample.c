@@ -34,7 +34,11 @@
 #endif
 
 #ifdef USE_SIMD_MIXING
+#ifdef USE_NEON
+#include <arm_neon.h>
+#else
 #include <smmintrin.h>
+#endif
 #endif
 
 #include "timidity.h"
@@ -195,8 +199,34 @@ static resample_t resample_gauss(sample_t *src, splen_t ofs, resample_rec_t *rec
 	gptr = gauss_table[ofs&FRACTION_MASK];
 	if (gauss_n == DEFAULT_GAUSS_ORDER) {
 	    /* 26-element dot product (int16 * float).
-	     * 24 elements via SSE4.1, 2 scalar remainder. */
+	     * 24 elements via SIMD, 2 scalar remainder. */
 #ifdef USE_SIMD_MIXING
+#ifdef USE_NEON
+	    {
+		float32x4_t acc0 = vdupq_n_f32(0);
+		float32x4_t acc1 = vdupq_n_f32(0);
+		int si;
+		for (si = 0; si < 24; si += 8) {
+		    int16x4_t raw0 = vld1_s16(sptr + si);
+		    int32x4_t s0 = vmovl_s16(raw0);
+		    acc0 = vmlaq_f32(acc0, vcvtq_f32_s32(s0),
+			vld1q_f32(gptr + si));
+		    int16x4_t raw1 = vld1_s16(sptr + si + 4);
+		    int32x4_t s1 = vmovl_s16(raw1);
+		    acc1 = vmlaq_f32(acc1, vcvtq_f32_s32(s1),
+			vld1q_f32(gptr + si + 4));
+		}
+		acc0 = vaddq_f32(acc0, acc1);
+		/* horizontal sum */
+		float32x2_t sum = vadd_f32(vget_low_f32(acc0),
+					   vget_high_f32(acc0));
+		sum = vpadd_f32(sum, sum);
+		y = vget_lane_f32(sum, 0);
+		/* 2 remaining elements */
+		y += sptr[24] * gptr[24];
+		y += sptr[25] * gptr[25];
+	    }
+#else
 	    {
 		__m128 acc0 = _mm_setzero_ps();
 		__m128 acc1 = _mm_setzero_ps();
@@ -224,6 +254,7 @@ static resample_t resample_gauss(sample_t *src, splen_t ofs, resample_rec_t *rec
 		y += sptr[24] * gptr[24];
 		y += sptr[25] * gptr[25];
 	    }
+#endif /* USE_NEON */
 #else
 	    {
 		int si;

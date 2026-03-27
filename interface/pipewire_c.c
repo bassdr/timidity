@@ -39,8 +39,6 @@
 #include <signal.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <sys/time.h>
-
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/control/control.h>
@@ -163,8 +161,6 @@ struct pw_midi_ctx {
 	struct midi_ringbuf midibuf;
 
 	/* timing */
-	double rate_frac;
-	long start_time_base;
 	long cur_time_offset;
 	int buffer_time_advance;
 	long buffer_time_offset;
@@ -741,22 +737,6 @@ static void ctl_event(CtlEvent *e)
 
 
 /*
- * Timing helpers
- */
-static long get_current_time(void)
-{
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return tv.tv_sec * 1000000L + tv.tv_usec - pwctx.start_time_base;
-}
-
-static void update_timestamp(void)
-{
-	pwctx.cur_time_offset = (long)(get_current_time() * pwctx.rate_frac);
-}
-
-
-/*
  * Process a raw MIDI message and feed it to the synthesis engine
  */
 static void seq_play_event(MidiEvent *ev)
@@ -849,8 +829,6 @@ static int start_sequencer(void)
 	pwctx.active = 1;
 	pwctx.buffer_time_offset = 0;
 	pwctx.cur_time_offset = 0;
-	pwctx.start_time_base = 0;
-	pwctx.start_time_base = get_current_time();
 	return 1;
 }
 
@@ -903,21 +881,37 @@ static void doit(void)
 		if (quit_flag || pw_disconnected)
 			return;
 
+		/*
+		 * Stamp all pending MIDI messages with the current
+		 * buffer position.  This ensures notes in a chord
+		 * (which arrive in the same PipeWire quantum) all get
+		 * the same sample position rather than being spread
+		 * apart by processing time between messages.
+		 *
+		 * We always use buffer_time_offset (which advances in
+		 * fixed increments tied to the audio buffer size)
+		 * rather than wall-clock time.  This keeps MIDI event
+		 * timing locked to the audio output clock and prevents
+		 * progressive drift — whether the output is a real-time
+		 * audio driver or a file encoder.
+		 */
+		pwctx.cur_time_offset = pwctx.buffer_time_offset;
+
 		/* drain all pending MIDI messages */
 		while ((msg = midibuf_peek(&pwctx.midibuf)) != NULL) {
 			if (!pwctx.active) {
 				if (!start_sequencer())
 					return;
 			}
-			update_timestamp();
 			process_midi_message(msg->data, msg->len);
 			midibuf_pop(&pwctx.midibuf);
 		}
 
 		if (pwctx.active) {
 			MidiEvent ev;
-			update_timestamp();
-			ev.time = pwctx.cur_time_offset;
+			pwctx.buffer_time_offset +=
+				pwctx.buffer_time_advance;
+			ev.time = pwctx.buffer_time_offset;
 			ev.type = ME_NONE;
 			play_event(&ev);
 			aq_fill_nonblocking();
@@ -1016,9 +1010,9 @@ static int ctl_pass_playing_list(int n, char *args[])
 
 		printf("PipeWire MIDI synthesizer ready\n");
 
-		if (IS_STREAM_TRACE) {
-			play_mode->acntl(PM_REQ_GETFRAGSIZ,
-					 &pwctx.buffer_time_advance);
+		if (IS_STREAM_TRACE &&
+		    play_mode->acntl(PM_REQ_GETFRAGSIZ,
+				     &pwctx.buffer_time_advance) == 0) {
 			if (!(play_mode->encoding & PE_MONO))
 				pwctx.buffer_time_advance >>= 1;
 			if (play_mode->encoding & PE_16BIT)
@@ -1027,9 +1021,15 @@ static int ctl_pass_playing_list(int n, char *args[])
 				(double)pwctx.buffer_time_advance /
 				play_mode->rate * 1.01, 0.0);
 		} else {
-			pwctx.buffer_time_offset = 0;
+			/*
+			 * File outputs (Ogg, FLAC, …) don't support
+			 * PM_REQ_GETFRAGSIZ.  Fall back to the global
+			 * synthesis batch size so buffer_time_offset
+			 * still advances in audio-clock units.
+			 */
+			pwctx.buffer_time_advance = audio_buffer_size;
 		}
-		pwctx.rate_frac = (double)play_mode->rate / 1000000.0;
+		pwctx.buffer_time_offset = 0;
 
 		for (;;) {
 			server_reset();

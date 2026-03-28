@@ -34,6 +34,17 @@ user session, use the OpenRC init script instead — it handles
 `XDG_RUNTIME_DIR` and `PULSE_SERVER` environment variables for the system-wide
 PipeWire socket (see `timidity.confd`).
 
+## C library requirement (PipeWire driver)
+
+The PipeWire audio driver (`pipewire_a.c`) uses `pthread_cond_broadcast`
+from within a signal handler to wake the audio writer thread on
+SIGINT/SIGTERM. This is not async-signal-safe per POSIX, but works
+reliably on glibc (the implementation is a simple futex wake). Other C
+libraries — notably musl — may not behave the same way, and could hang
+or crash on signal delivery. If porting to a musl-based distribution,
+this code path will need to be reworked (e.g. using a pipe or eventfd
+for cross-thread signal notification).
+
 ## Tested configuration
 
 The following has been tested on Gentoo Linux with PipeWire 1.6.2 and

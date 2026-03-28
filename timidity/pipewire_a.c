@@ -205,9 +205,9 @@ struct pw_ctx {
 
 	pthread_mutex_t lock;
 	pthread_cond_t cond;
-	int running;
+	int running;		/* accessed via __atomic builtins */
 	int draining;
-	int corked;		/* stream is corked (idle) */
+	int corked;		/* accessed via __atomic builtins */
 	int idle_frames;	/* consecutive empty frames from process cb */
 	int idle_threshold;	/* frames of silence before corking */
 
@@ -274,8 +274,9 @@ static void on_process(void *userdata)
 	} else {
 		memset(dst, 0, n_bytes);
 		c->idle_frames += n_frames;
-		if (!c->corked && c->idle_frames >= c->idle_threshold) {
-			c->corked = 1;
+		if (!__atomic_load_n(&c->corked, __ATOMIC_ACQUIRE) &&
+		    c->idle_frames >= c->idle_threshold) {
+			__atomic_store_n(&c->corked, 1, __ATOMIC_RELEASE);
 			pthread_mutex_unlock(&c->lock);
 			buf->datas[0].chunk->offset = 0;
 			buf->datas[0].chunk->stride = stride;
@@ -312,7 +313,7 @@ static void on_state_changed(void *userdata,
 	struct pw_ctx *c = (struct pw_ctx *)userdata;
 
 	/* ignore state changes during intentional teardown */
-	if (!c->running)
+	if (!__atomic_load_n(&c->running, __ATOMIC_ACQUIRE))
 		return;
 
 	if (state == PW_STREAM_STATE_ERROR ||
@@ -322,7 +323,7 @@ static void on_state_changed(void *userdata,
 			  "PipeWire: daemon disconnected (%s)",
 			  error ? error : "connection lost");
 		pthread_mutex_lock(&c->lock);
-		c->running = 0;
+		__atomic_store_n(&c->running, 0, __ATOMIC_RELEASE);
 		pthread_cond_signal(&c->cond);
 		pthread_mutex_unlock(&c->lock);
 	}
@@ -354,7 +355,7 @@ static void pw_sigterm_exit(int sig)
 	dummy += write(2, s, 3);
 	(void)dummy;
 
-	intr++;
+	__atomic_store_n(&intr, 1, __ATOMIC_RELEASE);
 	__atomic_store_n(&ctx.running, 0, __ATOMIC_RELEASE);
 	pthread_cond_broadcast(&ctx.cond);
 }
@@ -531,8 +532,8 @@ retry:
 		return -1;
 	}
 
-	ctx.running = 1;
-	ctx.corked = 0;
+	__atomic_store_n(&ctx.running, 1, __ATOMIC_RELEASE);
+	__atomic_store_n(&ctx.corked, 0, __ATOMIC_RELEASE);
 	ctx.idle_frames = 0;
 	ctx.idle_threshold = dpm.rate * IDLE_TIMEOUT_SEC;
 
@@ -560,7 +561,7 @@ static void close_output(void)
 	 * (not from a signal handler), so regular locking is safe.
 	 */
 	pthread_mutex_lock(&ctx.lock);
-	ctx.running = 0;
+	__atomic_store_n(&ctx.running, 0, __ATOMIC_RELEASE);
 	pthread_cond_signal(&ctx.cond);
 	pthread_mutex_unlock(&ctx.lock);
 
@@ -588,22 +589,23 @@ static int output_data(char *buf, int32 bytes)
 	int written;
 
 	/* uncork the stream if it was idle-suspended */
-	if (ctx.corked) {
+	if (__atomic_load_n(&ctx.corked, __ATOMIC_ACQUIRE)) {
 		pw_thread_loop_lock(ctx.loop);
 		pw_stream_set_active(ctx.stream, 1);
 		pw_thread_loop_unlock(ctx.loop);
 		pthread_mutex_lock(&ctx.lock);
-		ctx.corked = 0;
+		__atomic_store_n(&ctx.corked, 0, __ATOMIC_RELEASE);
 		ctx.idle_frames = 0;
 		pthread_mutex_unlock(&ctx.lock);
 	}
 
 	while (bytes > 0) {
 		pthread_mutex_lock(&ctx.lock);
-		while (ctx.running && ringbuf_empty(&ctx.rb) == 0)
+		while (__atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE) &&
+		       ringbuf_empty(&ctx.rb) == 0)
 			pthread_cond_wait(&ctx.cond, &ctx.lock);
 
-		if (!ctx.running) {
+		if (!__atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE)) {
 			pthread_mutex_unlock(&ctx.lock);
 			return -1;
 		}
@@ -650,7 +652,8 @@ static int acntl(int request, void *arg)
 
 	case PM_REQ_FLUSH:
 		pthread_mutex_lock(&ctx.lock);
-		while (ctx.running && ringbuf_available(&ctx.rb) > 0)
+		while (__atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE) &&
+		       ringbuf_available(&ctx.rb) > 0)
 			pthread_cond_wait(&ctx.cond, &ctx.lock);
 		pthread_mutex_unlock(&ctx.lock);
 		/* fall through */

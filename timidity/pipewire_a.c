@@ -42,6 +42,7 @@
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 
+#include <signal.h>
 #include <unistd.h>
 
 #include "timidity.h"
@@ -51,6 +52,8 @@
 #include "instrum.h"
 #include "playmidi.h"
 #include "miditrace.h"
+
+extern VOLATILE int intr;
 
 /*
  * Retry delay for connecting to the PipeWire daemon.  System services
@@ -244,7 +247,18 @@ static void on_process(void *userdata)
 
 	n_bytes = n_frames * stride;
 
-	pthread_mutex_lock(&c->lock);
+	/*
+	 * Use trylock: this is a realtime callback and must never block.
+	 * If the main thread holds the lock (e.g. inside output_data)
+	 * and a signal fires, close_output needs pw_thread_loop_lock
+	 * which waits for this callback to return.  Blocking here on
+	 * ctx.lock would deadlock.  Output silence instead.
+	 */
+	if (pthread_mutex_trylock(&c->lock) != 0) {
+		memset(dst, 0, n_bytes);
+		goto fill_done;
+	}
+
 	avail = ringbuf_available(&c->rb);
 
 	if (avail >= n_bytes) {
@@ -276,6 +290,7 @@ static void on_process(void *userdata)
 	pthread_cond_signal(&c->cond);
 	pthread_mutex_unlock(&c->lock);
 
+fill_done:
 	buf->datas[0].chunk->offset = 0;
 	buf->datas[0].chunk->stride = stride;
 	buf->datas[0].chunk->size = n_bytes;
@@ -318,6 +333,31 @@ static const struct pw_stream_events stream_events = {
 	.process = on_process,
 	.state_changed = on_state_changed,
 };
+
+
+/*
+ * Signal handler for SIGINT/SIGTERM.  Instead of calling safe_exit()
+ * (which does full teardown from signal context and deadlocks on our
+ * condvar/mutex), just set the existing `intr` flag and wake up
+ * output_data().  The playback loop checks `intr` in compute_data()
+ * and unwinds normally, reaching close_output() on the main thread.
+ */
+static void pw_sigterm_exit(int sig)
+{
+	char s[4];
+	ssize_t dummy;
+
+	dummy = write(2, "Terminated sig=0x", 17);
+	s[0] = "0123456789abcdef"[(sig >> 4) & 0xf];
+	s[1] = "0123456789abcdef"[sig & 0xf];
+	s[2] = '\n';
+	dummy += write(2, s, 3);
+	(void)dummy;
+
+	intr++;
+	__atomic_store_n(&ctx.running, 0, __ATOMIC_RELEASE);
+	pthread_cond_broadcast(&ctx.cond);
+}
 
 
 static int detect(void)
@@ -501,6 +541,17 @@ retry:
 	ctx.corked = 0;
 	ctx.idle_frames = 0;
 	ctx.idle_threshold = dpm.rate * IDLE_TIMEOUT_SEC;
+
+	/*
+	 * Override the default signal handler.  The default sigterm_exit
+	 * calls safe_exit() which does full teardown from signal context
+	 * and deadlocks on our condvar.  Our handler just sets `intr`
+	 * and wakes output_data(); the playback loop notices and unwinds
+	 * normally through close_output() on the main thread.
+	 */
+	signal(SIGINT, pw_sigterm_exit);
+	signal(SIGTERM, pw_sigterm_exit);
+
 	dpm.fd = 0; /* mark as open */
 	return ret_val;
 }
@@ -511,11 +562,8 @@ static void close_output(void)
 		return;
 
 	/*
-	 * Signal the writer thread to stop, then wake it in case it's
-	 * blocked in pthread_cond_wait inside output_data().
-	 * This must happen before pw_thread_loop_stop() which joins the
-	 * PipeWire thread — otherwise we can deadlock if on_process holds
-	 * ctx.lock while output_data is waiting on ctx.cond.
+	 * close_output is now only called from the normal shutdown path
+	 * (not from a signal handler), so regular locking is safe.
 	 */
 	pthread_mutex_lock(&ctx.lock);
 	ctx.running = 0;

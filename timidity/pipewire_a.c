@@ -444,21 +444,15 @@ static int open_output(void)
 	/*
 	 * The ring buffer must be large enough for PipeWire's quantum.
 	 * PipeWire's default quantum is 1024 frames; the minimum safe
-	 * ring buffer is 2× that.  With -B8,2 the user-requested buffer
-	 * would be only 512 frames — far too small.  Clamp to a sane
-	 * minimum without overriding the user's fragment geometry.
+	 * ring buffer is 2× that.  Silently clamp to a sane minimum
+	 * without overriding the user's fragment geometry.
 	 */
 	{
 		int rb_frames = ctx.frag_size * ctx.frags;
 		int min_frames = 4096;		/* safe for quantums up to 2048 */
 
-		if (rb_frames < min_frames) {
-			ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
-				  "PipeWire: buffer too small (%d frames), "
-				  "clamped to %d frames",
-				  rb_frames, min_frames);
+		if (rb_frames < min_frames)
 			rb_frames = min_frames;
-		}
 
 		pthread_mutex_init(&ctx.lock, NULL);
 		pthread_cond_init(&ctx.cond, NULL);

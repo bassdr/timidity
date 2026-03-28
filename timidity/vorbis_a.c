@@ -356,7 +356,19 @@ static int ogg_output_open(const char *fname, const char *comment)
     ogg_stream_packetin(&os, &header_comm);
     ogg_stream_packetin(&os, &header_code);
 
-    /* no need to write out here.  We'll get to that in the main loop */
+    /* Flush header pages immediately.  The Vorbis I spec requires that
+       the identification header is alone on the first page and that
+       comment + codebook headers are on separate page(s) from audio
+       data.  Without an explicit flush, ogg_stream_pageout in
+       output_data() may combine header and data packets on one page,
+       producing "Not a Vorbis I audio packet" errors in decoders. */
+    {
+      ogg_page og;
+      while (ogg_stream_flush(&os, &og)) {
+        std_write(fd, og.header, og.header_len);
+        std_write(fd, og.body, og.body_len);
+      }
+    }
   }
 
   return fd;
@@ -507,21 +519,20 @@ static void close_output(void)
     vorbis_analysis(&vb, NULL);
     vorbis_bitrate_addblock(&vb);
 
-    while(vorbis_bitrate_flushpacket(&vd,&op)) { 
+    while(vorbis_bitrate_flushpacket(&vd,&op)) {
 
     /* weld the packet into the bitstream */
     ogg_stream_packetin(&os, &op);
 
-    /* write out pages (if any) */
+    /* Flush remaining pages.  Use ogg_stream_flush (not pageout)
+       so the final EOS page is written even when it doesn't fill
+       a complete page. */
     while(!eos){
-      int result = ogg_stream_pageout(&os,&og);
+      int result = ogg_stream_flush(&os,&og);
       if(result == 0)
 	break;
       std_write(dpm.fd, og.header, og.header_len);
       std_write(dpm.fd, og.body, og.body_len);
-
-      /* this could be set above, but for illustrative purposes, I do
-	 it here (to show that vorbis does know where the stream ends) */
 
       if(ogg_page_eos(&og))
 	eos = 1;

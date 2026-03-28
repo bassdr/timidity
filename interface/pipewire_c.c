@@ -39,6 +39,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/control/control.h>
@@ -164,6 +165,10 @@ struct pw_midi_ctx {
 	long cur_time_offset;
 	int buffer_time_advance;
 	long buffer_time_offset;
+
+	/* file output pacing: sync audio clock to wall clock */
+	int file_output;
+	struct timespec start_ts;
 
 	/* auto-linking: auxiliary core connection for registry + link mgmt */
 	struct pw_context   *aux_ctx;
@@ -829,6 +834,8 @@ static int start_sequencer(void)
 	pwctx.active = 1;
 	pwctx.buffer_time_offset = 0;
 	pwctx.cur_time_offset = 0;
+	if (pwctx.file_output)
+		clock_gettime(CLOCK_MONOTONIC, &pwctx.start_ts);
 	return 1;
 }
 
@@ -918,12 +925,34 @@ static void doit(void)
 		}
 
 		/*
-		 * Sleep to avoid busy-waiting.  When active, scale the
-		 * sleep to half the audio fragment duration so we wake
-		 * well before the next buffer is due.  Cap at 500 µs to
-		 * keep MIDI latency low under all configurations.
+		 * Sleep to avoid busy-waiting.
+		 *
+		 * File outputs have no backpressure — audio would be
+		 * generated thousands of times faster than real-time,
+		 * making MIDI events (which arrive in real-time from
+		 * PipeWire) land at the wrong positions.  Pace the
+		 * loop to wall-clock time so audio and MIDI stay in
+		 * sync.
+		 *
+		 * Real-time audio outputs are naturally paced by the
+		 * device consuming samples; just sleep briefly to
+		 * keep MIDI latency low.
 		 */
-		if (pwctx.active) {
+		if (pwctx.file_output && pwctx.active) {
+			struct timespec now;
+			double elapsed, audio_time, ahead;
+			clock_gettime(CLOCK_MONOTONIC, &now);
+			elapsed = (now.tv_sec - pwctx.start_ts.tv_sec)
+				+ (now.tv_nsec - pwctx.start_ts.tv_nsec)
+				  * 1e-9;
+			audio_time = (double)pwctx.buffer_time_offset
+				     / play_mode->rate;
+			ahead = audio_time - elapsed;
+			if (ahead > 0.0001) {
+				long us = (long)(ahead * 1e6);
+				usleep(us > 50000 ? 50000 : us);
+			}
+		} else if (pwctx.active) {
 			int us = pwctx.buffer_time_advance * 500000
 				 / play_mode->rate;
 			usleep(us > 500 ? 500 : (us > 0 ? us : 100));
@@ -1020,14 +1049,18 @@ static int ctl_pass_playing_list(int n, char *args[])
 			aq_set_soft_queue(
 				(double)pwctx.buffer_time_advance /
 				play_mode->rate * 1.01, 0.0);
+			pwctx.file_output = 0;
 		} else {
 			/*
 			 * File outputs (Ogg, FLAC, …) don't support
 			 * PM_REQ_GETFRAGSIZ.  Fall back to the global
 			 * synthesis batch size so buffer_time_offset
 			 * still advances in audio-clock units.
+			 * Enable wall-clock pacing so audio time doesn't
+			 * race ahead of the real-time MIDI input.
 			 */
 			pwctx.buffer_time_advance = audio_buffer_size;
+			pwctx.file_output = 1;
 		}
 		pwctx.buffer_time_offset = 0;
 

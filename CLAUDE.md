@@ -104,3 +104,15 @@ Parallelizing voice mixing was considered but rejected. The per-voice pipeline (
 - **Side effects in the mix loop**: `free_voice()` is called from within `mix_voice()` (on `VOICE_DIE`), mutating global `voice[]` state and freeing memory. `ctl_note_event()` (UI notification) is also called inline.
 - **Channel buffer routing races**: In the DSP effects path, multiple voices on the same MIDI channel accumulate into the same `vpblist[ch]` buffer. In the non-DSP path, non-reverb voices all target `buffer_pointer`. Concurrent writes would race.
 - **Small payoff**: `AUDIO_BUFFER_SIZE` (~4096 samples, 32KB stereo) fits in L1. SIMD already accelerates the inner loops. Thread synchronization overhead (barrier per ~5ms audio buffer) would likely dominate for typical voice counts.
+
+## Roadmap
+
+### Synthesis improvements (vs FluidSynth)
+
+These are the remaining areas where FluidSynth produces better results, in priority order:
+
+1. **SF2 modulator support** — `sndfont.c` reads samples and basic parameters but doesn't implement the SF2 modulator graph (~30 default modulators like velocity→filter cutoff, key→envelope time, LFO routing). Biggest audible gap for expressive patches.
+2. **Filter envelope modulation** — Lowpass filter exists but the modulation envelope driving it is simplified vs. the full SF2 spec.
+3. **Reverb/chorus quality** — `reverb.c` is functional but dated. Could be improved independently.
+4. **SF3 (Ogg Vorbis compressed SoundFonts)** — Not supported. Would allow using compressed SoundFont files.
+5. **Polyphony management** — Voice stealing could be smarter with release-phase awareness.

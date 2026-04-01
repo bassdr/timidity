@@ -63,17 +63,41 @@ int sample_bounds_min, sample_bounds_max; /* min/max bounds for sample data */
 
 static resample_t resample_cspline(sample_t *src, splen_t ofs, resample_rec_t *rec)
 {
-    int32 ofsi, ofsf, v0, v1, v2, v3, temp;
+    int32 ofsi;
 
     if (ofs + (1 << FRACTION_BITS) >= rec->data_length)
       return src[ofs >> FRACTION_BITS];
     ofsi = ofs >> FRACTION_BITS;
-    v1 = src[ofsi];
-    v2 = src[ofsi + 1];
-    if((ofs<rec->loop_start+(1L<<FRACTION_BITS))||
-       ((ofs+(2L<<FRACTION_BITS))>rec->loop_end)){
-	return (v1 + ((resample_t)((v2 - v1) * (ofs & FRACTION_MASK)) >> FRACTION_BITS));
-    } else {
+#ifdef USE_FLOAT_MIXING
+    {
+	float v0, v1, v2, v3, t, inner1, inner2, term1, term2;
+
+	v1 = (float)src[ofsi];
+	v2 = (float)src[ofsi + 1];
+	if((ofs<rec->loop_start+(1L<<FRACTION_BITS))||
+	   ((ofs+(2L<<FRACTION_BITS))>rec->loop_end)){
+	    t = (float)(ofs & FRACTION_MASK) / (float)(1 << FRACTION_BITS);
+	    return v1 + (v2 - v1) * t;
+	}
+	v0 = (float)src[ofsi - 1];
+	v3 = (float)src[ofsi + 2];
+	t = (float)(ofs & FRACTION_MASK) / (float)(1 << FRACTION_BITS);
+	inner2 = (5*v3 - 11*v2 + 7*v1 - v0) * 0.25f * (t + 1) * (t - 1);
+	term2 = (6*v2 + inner2) * t;
+	inner1 = (5*v0 - 11*v1 + 7*v2 - v3) * 0.25f * t * (t - 2);
+	term1 = (6*v1 + inner1) * (1 - t);
+	return (term1 + term2) / 6.0f;
+    }
+#else
+    {
+	int32 ofsf, v0, v1, v2, v3, temp;
+
+	v1 = src[ofsi];
+	v2 = src[ofsi + 1];
+	if((ofs<rec->loop_start+(1L<<FRACTION_BITS))||
+	   ((ofs+(2L<<FRACTION_BITS))>rec->loop_end)){
+	    return (v1 + ((resample_t)((v2 - v1) * (ofs & FRACTION_MASK)) >> FRACTION_BITS));
+	}
 	v0 = src[ofsi - 1];
 	v3 = src[ofsi + 2];
 	ofsf = ofs & FRACTION_MASK;
@@ -89,6 +113,7 @@ static resample_t resample_cspline(sample_t *src, splen_t ofs, resample_rec_t *r
 	return ((v1 > sample_bounds_max) ? sample_bounds_max :
 		((v1 < sample_bounds_min) ? sample_bounds_min : v1));
     }
+#endif
 }
 
 
@@ -104,17 +129,40 @@ static resample_t resample_cspline(sample_t *src, splen_t ofs, resample_rec_t *r
 
 static resample_t resample_lagrange(sample_t *src, splen_t ofs, resample_rec_t *rec)
 {
-    int32 ofsi, ofsf, v0, v1, v2, v3;
+    int32 ofsi;
 
     if (ofs + (1 << FRACTION_BITS) >= rec->data_length)
       return src[ofs >> FRACTION_BITS];
     ofsi = ofs >> FRACTION_BITS;
-    v1 = (int32)src[ofsi];
-    v2 = (int32)src[ofsi + 1];
-    if((ofs<rec->loop_start+(1L<<FRACTION_BITS))||
-       ((ofs+(2L<<FRACTION_BITS))>rec->loop_end)) {
-	return (v1 + ((resample_t)((v2 - v1) * (ofs & FRACTION_MASK)) >> FRACTION_BITS));
-    } else {
+#ifdef USE_FLOAT_MIXING
+    {
+	float v0, v1, v2, v3, x, result;
+
+	v1 = (float)src[ofsi];
+	v2 = (float)src[ofsi + 1];
+	if((ofs<rec->loop_start+(1L<<FRACTION_BITS))||
+	   ((ofs+(2L<<FRACTION_BITS))>rec->loop_end)) {
+	    float t = (float)(ofs & FRACTION_MASK) / (float)(1 << FRACTION_BITS);
+	    return v1 + (v2 - v1) * t;
+	}
+	v0 = (float)src[ofsi - 1];
+	v3 = (float)src[ofsi + 2];
+	x = (float)(ofs & FRACTION_MASK) / (float)(1 << FRACTION_BITS) + 1.0f;
+	result = (v3 - 3*v2 + 3*v1 - v0) * (x - 2.0f) / 6.0f;
+	result = (result + v2 - 2*v1 + v0) * (x - 1.0f) * 0.5f;
+	result = (result + v1 - v0) * x + v0;
+	return result;
+    }
+#else
+    {
+	int32 ofsf, v0, v1, v2, v3;
+
+	v1 = (int32)src[ofsi];
+	v2 = (int32)src[ofsi + 1];
+	if((ofs<rec->loop_start+(1L<<FRACTION_BITS))||
+	   ((ofs+(2L<<FRACTION_BITS))>rec->loop_end)) {
+	    return (v1 + ((resample_t)((v2 - v1) * (ofs & FRACTION_MASK)) >> FRACTION_BITS));
+	}
 	v0 = (int32)src[ofsi - 1];
 	v3 = (int32)src[ofsi + 2];
 	ofsf = (ofs & FRACTION_MASK) + (1<<FRACTION_BITS);
@@ -131,6 +179,7 @@ static resample_t resample_lagrange(sample_t *src, splen_t ofs, resample_rec_t *
 	return ((v3 > sample_bounds_max) ? sample_bounds_max :
 		((v3 < sample_bounds_min) ? sample_bounds_min : v3));
     }
+#endif
 }
 
 
@@ -189,8 +238,12 @@ static resample_t resample_gauss(sample_t *src, splen_t ofs, resample_rec_t *rec
 	    y *= xd - --ii;
 	}
 	y += *sptr;
+#ifdef USE_FLOAT_MIXING
+	return y;
+#else
 	return ((y > sample_bounds_max) ? sample_bounds_max :
 		((y < sample_bounds_min) ? sample_bounds_min : y));
+#endif
     } else {
 	float *gptr, *gend;
 	float y;
@@ -268,8 +321,12 @@ static resample_t resample_gauss(sample_t *src, splen_t ofs, resample_rec_t *rec
 		y += *(sptr++) * *(gptr++);
 	    } while (gptr <= gend);
 	}
+#ifdef USE_FLOAT_MIXING
+	return y;
+#else
 	return ((y > sample_bounds_max) ? sample_bounds_max :
 		((y < sample_bounds_min) ? sample_bounds_min : y));
+#endif
     }
 }
 
@@ -367,8 +424,12 @@ static resample_t resample_newton(sample_t *src, splen_t ofs, resample_rec_t *re
 	newt_old_src = src;
 	newt_old_trunc_x = (ofs>>FRACTION_BITS);
     }
+#ifdef USE_FLOAT_MIXING
+    return (resample_t)y;
+#else
     return ((y > sample_bounds_max) ? sample_bounds_max :
     	    ((y < sample_bounds_min) ? sample_bounds_min : y));
+#endif
 }
 
 
@@ -383,7 +444,10 @@ static resample_t resample_linear(sample_t *src, splen_t ofs, resample_rec_t *re
     ofsi = ofs >> FRACTION_BITS;
     v1 = src[ofsi];
     v2 = src[ofsi + 1];
-#if defined(LOOKUP_HACK) && defined(LOOKUP_INTERPOLATION)
+#ifdef USE_FLOAT_MIXING
+    return (float)v1 + (float)(v2 - v1) *
+	((float)(ofs & FRACTION_MASK) / (float)(1 << FRACTION_BITS));
+#elif defined(LOOKUP_HACK) && defined(LOOKUP_INTERPOLATION)
     return (sample_t)(v1 + (iplookup[(((v2 - v1) << 5) & 0x03FE0) |
 				     ((ofs & FRACTION_MASK) >> (FRACTION_BITS-5))]));
 #else

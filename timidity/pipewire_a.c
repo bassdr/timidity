@@ -25,9 +25,9 @@
 
     Like JACK, PipeWire uses a "pull" model which doesn't match TiMidity's
     "push" model. We use an intermediate ring buffer (same approach as
-    jack_a.c) to bridge the two. Unlike the JACK driver, we send S16 PCM
-    directly to PipeWire (which handles format conversion server-side),
-    avoiding the S16-to-float conversion overhead.
+    jack_a.c) to bridge the two. By default we send F32 (float) samples
+    directly, which is PipeWire's native processing format — avoiding a
+    final integer-to-float conversion server-side.
 */
 
 #ifdef HAVE_CONFIG_H
@@ -72,7 +72,7 @@ static int detect(void);
 
 PlayMode dpm = {
 	DEFAULT_RATE,
-	PE_16BIT | PE_SIGNED,
+	PE_F32BIT | PE_SIGNED,
 	PF_PCM_STREAM | PF_CAN_TRACE | PF_BUFF_FRAGM_OPT,
 	-1,
 	{0},
@@ -87,7 +87,7 @@ PlayMode dpm = {
 
 /*
  * Ring buffer for bridging push (TiMidity) and pull (PipeWire) models.
- * Stores raw S16 interleaved PCM data.
+ * Stores raw interleaved PCM data (F32, S24, S16, or U8).
  */
 
 struct ringbuf {
@@ -199,7 +199,7 @@ struct pw_ctx {
 	struct pw_stream *stream;
 
 	int channels;
-	int sample_size;	/* bytes per frame (channels * sizeof(int16_t)) */
+	int sample_size;	/* bytes per frame (channels * bytes_per_sample) */
 	int frag_size;		/* fragment size in frames */
 	int frags;		/* number of fragments */
 
@@ -388,7 +388,11 @@ static int open_output(void)
 	else
 		ctx.channels = 2;
 
-	if (dpm.encoding & PE_24BIT) {
+	if (dpm.encoding & PE_F32BIT) {
+		spa_fmt = SPA_AUDIO_FORMAT_F32_LE;
+		dpm.encoding |= PE_SIGNED;
+		ctx.sample_size = 4 * ctx.channels;
+	} else if (dpm.encoding & PE_24BIT) {
 		spa_fmt = SPA_AUDIO_FORMAT_S24_LE;
 		dpm.encoding |= PE_SIGNED;
 		ctx.sample_size = 3 * ctx.channels;

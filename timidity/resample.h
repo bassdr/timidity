@@ -27,7 +27,11 @@
 #include "config.h"
 #endif
 
+#ifdef USE_FLOAT_MIXING
+typedef float resample_t;
+#else
 typedef int32 resample_t;
+#endif
 
 enum {
 	RESAMPLE_CSPLINE,

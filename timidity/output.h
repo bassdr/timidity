@@ -37,6 +37,7 @@
 #define PE_ALAW 	(1u<<4)  /* versus linear */
 #define PE_BYTESWAP	(1u<<5)  /* versus the other way */
 #define PE_24BIT	(1u<<6)  /* versus 8-bit, 16-bit */
+#define PE_F32BIT	(1u<<7)  /* 32-bit float */
 
 /* for play_mode->acntl() */
 enum {
@@ -163,6 +164,9 @@ extern void s32tou16(int32 *lp, int32 c);
 /* 24-bit */
 extern void s32tos24(int32 *lp, int32 c);
 extern void s32tou24(int32 *lp, int32 c);
+
+/* 32-bit float */
+extern void s32tof32(int32 *lp, int32 c);
 
 /* byte-exchanged 16-bit */
 extern void s32tos16x(int32 *lp, int32 c);

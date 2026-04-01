@@ -418,6 +418,27 @@ void s32tou24x(int32 *lp, int32 c)
 	}
 }
 
+void s32tof32(int32 *lp, int32 c)
+{
+    /*
+     * Convert int32 with GUARD_BITS headroom to IEEE 754 float in [-1.0, 1.0].
+     * The int32 values use bits [GUARD_BITS .. 31], so dividing by
+     * (1 << (31 - GUARD_BITS)) normalises to [-1.0, 1.0].
+     * float has 24 bits of mantissa — more than the ~27 significant bits here,
+     * so this is lossless for the meaningful range.
+     *
+     * We write floats into the same buffer.  sizeof(float) == sizeof(int32),
+     * so the buffer is large enough and general_output_convert returns
+     * count * 4 bytes — the same as the input.
+     */
+    float *fp = (float *)(lp);
+    const float scale = 1.0f / (float)(1 << (31 - GUARD_BITS));
+    int32 i;
+
+    for (i = 0; i < c; i++)
+	fp[i] = (float)lp[i] * scale;
+}
+
 void s32toulaw(int32 *lp, int32 c)
 {
     int8 *up=(int8 *)(lp);
@@ -454,7 +475,12 @@ int32 general_output_convert(int32 *buf, int32 count)
     if(!(play_mode->encoding & PE_MONO))
 	count *= 2; /* Stereo samples */
     bytes = count;
-    if(play_mode->encoding & PE_16BIT)
+    if(play_mode->encoding & PE_F32BIT)
+    {
+	bytes *= 4;
+	s32tof32(buf, count);
+    }
+    else if(play_mode->encoding & PE_16BIT)
     {
 	bytes *= 2;
 	if(play_mode->encoding & PE_BYTESWAP)
@@ -501,10 +527,12 @@ int validate_encoding(int enc, int include_enc, int exclude_enc)
     enc |= include_enc;
     enc &= ~exclude_enc;
     if(enc & (PE_ULAW|PE_ALAW))
-	enc &= ~(PE_24BIT|PE_16BIT|PE_SIGNED|PE_BYTESWAP);
-    if(!(enc & PE_16BIT || enc & PE_24BIT))
+	enc &= ~(PE_F32BIT|PE_24BIT|PE_16BIT|PE_SIGNED|PE_BYTESWAP);
+    if(!(enc & PE_16BIT || enc & PE_24BIT || enc & PE_F32BIT))
 	enc &= ~PE_BYTESWAP;
-    if(enc & PE_24BIT)
+    if(enc & PE_F32BIT)
+	enc &= ~(PE_24BIT|PE_16BIT);	/* f32 overrides others */
+    else if(enc & PE_24BIT)
 	enc &= ~PE_16BIT;	/* 24bit overrides 16bit */
     enc_name = output_encoding_string(enc);
     if(strcmp(orig_enc_name, enc_name) != 0)
@@ -517,7 +545,7 @@ int validate_encoding(int enc, int include_enc, int exclude_enc)
 int32 apply_encoding(int32 old_enc, int32 new_enc)
 {
 	const int32 mutex_flags[] = {
-		PE_16BIT | PE_24BIT | PE_ULAW | PE_ALAW,
+		PE_16BIT | PE_24BIT | PE_F32BIT | PE_ULAW | PE_ALAW,
 		PE_BYTESWAP | PE_ULAW | PE_ALAW,
 		PE_SIGNED | PE_ULAW | PE_ALAW,
 	};
@@ -534,7 +562,9 @@ const char *output_encoding_string(int enc)
 {
     if(enc & PE_MONO)
     {
-	if(enc & PE_16BIT)
+	if(enc & PE_F32BIT)
+	    return "float32 (mono)";
+	else if(enc & PE_16BIT)
 	{
 	    if(enc & PE_SIGNED)
 		return "16bit (mono)";
@@ -560,6 +590,8 @@ const char *output_encoding_string(int enc)
 		return "unsigned 8bit (mono)";
 	}
     }
+    else if(enc & PE_F32BIT)
+	return "float32";
     else if(enc & PE_16BIT)
     {
 	if(enc & PE_BYTESWAP)
@@ -597,7 +629,9 @@ int get_encoding_sample_size(int32 enc)
 {
 	int size = (enc & PE_MONO) ? 1 : 2;
 
-	if (enc & PE_24BIT)
+	if (enc & PE_F32BIT)
+		size *= 4;
+	else if (enc & PE_24BIT)
 		size *= 3;
 	else if (enc & PE_16BIT)
 		size *= 2;

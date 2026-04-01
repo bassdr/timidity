@@ -385,8 +385,13 @@ typedef struct {
 	int16 freq, last_freq, orig_freq;
 	double reso_dB, last_reso_dB, orig_reso_dB, reso_lin; 
 	int8 type;	/* filter type. 0: Off, 1: 12dB/oct, 2: 24dB/oct */ 
+#ifdef USE_FLOAT_MIXING
+	float f, q, p;
+	float b0, b1, b2, b3, b4;
+#else
 	int32 f, q, p;	/* coefficients in fixed-point */
 	int32 b0, b1, b2, b3, b4;
+#endif
 	float gain;
 	int8 start_flag;
 } FilterCoefficients;

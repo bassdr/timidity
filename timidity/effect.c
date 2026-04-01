@@ -288,8 +288,12 @@ void do_effect(int32 *buf, int32 count)
 	}
 	/* L/R Delay */
 	effect_left_right_delay(buf, count);
-	/* Noise shaping filter must apply at last */
-	if (play_mode->encoding & PE_24BIT)
+	/* Noise shaping filter must apply at last.
+	 * F32 has 24-bit mantissa — no dithering needed.
+	 */
+	if (play_mode->encoding & PE_F32BIT)
+		;  /* skip — float output needs no dithering */
+	else if (play_mode->encoding & PE_24BIT)
 		ns_dither24(buf, count);
 	else if (! (play_mode->encoding & (PE_16BIT | PE_ULAW | PE_ALAW)))
 		ns_shaping8(buf, count);

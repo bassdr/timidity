@@ -54,7 +54,11 @@
 #define VOICE_LPF
 #endif
 
+#ifdef USE_FLOAT_MIXING
+typedef float mix_t;
+#else
 typedef int32 mix_t;
+#endif
 
 #ifdef LOOKUP_HACK
 #define MIXATION(a) *lp++ += mixup[(a << 8) | (uint8) s]
@@ -74,20 +78,62 @@ typedef int32 mix_t;
 #include <smmintrin.h>
 #endif
 
-/* SIMD block mix: stereo interleaved output, constant volumes */
+/* SIMD block mix: stereo interleaved output, constant volumes.
+ * Input: mix_t samples (float or int32), output: int32 accumulation buffer.
+ */
 static inline void mix_block_stereo(mix_t *sp, int32 *lp,
 		int32 left, int32 right, int count)
 {
+#ifdef USE_FLOAT_MIXING
+#ifdef USE_NEON
+	float32x4_t vol_lr = {(float)left, (float)right,
+			      (float)left, (float)right};
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		float32x4_t samples = vld1q_f32(sp + i);
+		float32x2_t lo = vget_low_f32(samples);
+		float32x2_t hi = vget_high_f32(samples);
+		float32x4_t s01 = vcombine_f32(vdup_lane_f32(lo, 0),
+						vdup_lane_f32(lo, 1));
+		float32x4_t s23 = vcombine_f32(vdup_lane_f32(hi, 0),
+						vdup_lane_f32(hi, 1));
+		int32x4_t prod0 = vcvtq_s32_f32(vmulq_f32(s01, vol_lr));
+		int32x4_t prod1 = vcvtq_s32_f32(vmulq_f32(s23, vol_lr));
+		int32x4_t out0 = vld1q_s32(lp + i * 2);
+		int32x4_t out1 = vld1q_s32(lp + i * 2 + 4);
+		vst1q_s32(lp + i * 2, vaddq_s32(out0, prod0));
+		vst1q_s32(lp + i * 2 + 4, vaddq_s32(out1, prod1));
+	}
+#else
+	__m128 vol = _mm_set_ps((float)right, (float)left,
+				(float)right, (float)left);
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		__m128 samples = _mm_loadu_ps(sp + i);
+		__m128 s01 = _mm_unpacklo_ps(samples, samples);
+		__m128 s23 = _mm_unpackhi_ps(samples, samples);
+		__m128i prod0 = _mm_cvttps_epi32(_mm_mul_ps(s01, vol));
+		__m128i prod1 = _mm_cvttps_epi32(_mm_mul_ps(s23, vol));
+		__m128i out0 = _mm_loadu_si128((__m128i *)(lp + i * 2));
+		__m128i out1 = _mm_loadu_si128((__m128i *)(lp + i * 2 + 4));
+		_mm_storeu_si128((__m128i *)(lp + i * 2),
+			_mm_add_epi32(out0, prod0));
+		_mm_storeu_si128((__m128i *)(lp + i * 2 + 4),
+			_mm_add_epi32(out1, prod1));
+	}
+#endif
+#else /* int32 mixing */
 #ifdef USE_NEON
 	int32x4_t vol_lr = {left, right, left, right};
 	int i = 0;
 	for (; i + 3 < count; i += 4) {
 		int32x4_t samples = vld1q_s32(sp + i);
-		/* duplicate each sample for L/R: [s0,s0,s1,s1] [s2,s2,s3,s3] */
 		int32x2_t lo = vget_low_s32(samples);
 		int32x2_t hi = vget_high_s32(samples);
-		int32x4_t s01 = vcombine_s32(vzip1_s32(lo, lo), vzip2_s32(lo, lo));
-		int32x4_t s23 = vcombine_s32(vzip1_s32(hi, hi), vzip2_s32(hi, hi));
+		int32x4_t s01 = vcombine_s32(vdup_lane_s32(lo, 0),
+					     vdup_lane_s32(lo, 1));
+		int32x4_t s23 = vcombine_s32(vdup_lane_s32(hi, 0),
+					     vdup_lane_s32(hi, 1));
 		int32x4_t out0 = vld1q_s32(lp + i * 2);
 		int32x4_t out1 = vld1q_s32(lp + i * 2 + 4);
 		vst1q_s32(lp + i * 2, vaddq_s32(out0, vmulq_s32(s01, vol_lr)));
@@ -108,6 +154,7 @@ static inline void mix_block_stereo(mix_t *sp, int32 *lp,
 			_mm_add_epi32(out1, _mm_mullo_epi32(s23, vol)));
 	}
 #endif
+#endif /* USE_FLOAT_MIXING */
 	for (; i < count; i++) {
 		lp[i * 2] += left * sp[i];
 		lp[i * 2 + 1] += right * sp[i];
@@ -118,14 +165,39 @@ static inline void mix_block_stereo(mix_t *sp, int32 *lp,
 static inline void mix_block_single(mix_t *sp, int32 *lp,
 		int32 left, int count)
 {
+#ifdef USE_FLOAT_MIXING
+#ifdef USE_NEON
+	float32x4_t vol = {(float)left, 0, (float)left, 0};
+	int i = 0;
+	for (; i + 1 < count; i += 2) {
+		float32x2_t raw = vld1_f32(sp + i);
+		float32x2x2_t z = vzip_f32(raw, vdup_n_f32(0));
+		float32x4_t s = vcombine_f32(z.val[0], z.val[1]);
+		int32x4_t prod = vcvtq_s32_f32(vmulq_f32(s, vol));
+		int32x4_t out = vld1q_s32(lp + i * 2);
+		vst1q_s32(lp + i * 2, vaddq_s32(out, prod));
+	}
+#else
+	__m128 vol = _mm_set_ps(0, (float)left, 0, (float)left);
+	int i = 0;
+	for (; i + 1 < count; i += 2) {
+		__m128 raw = _mm_castsi128_ps(
+			_mm_loadl_epi64((__m128i *)(sp + i)));
+		__m128 s = _mm_unpacklo_ps(raw, _mm_setzero_ps());
+		__m128i prod = _mm_cvttps_epi32(_mm_mul_ps(s, vol));
+		__m128i out = _mm_loadu_si128((__m128i *)(lp + i * 2));
+		_mm_storeu_si128((__m128i *)(lp + i * 2),
+			_mm_add_epi32(out, prod));
+	}
+#endif
+#else /* int32 mixing */
 #ifdef USE_NEON
 	int32x4_t vol = {left, 0, left, 0};
 	int i = 0;
 	for (; i + 1 < count; i += 2) {
 		int32x2_t raw = vld1_s32(sp + i);
-		/* interleave with zeros: [s0, 0, s1, 0] */
-		int32x4_t s = vcombine_s32(vzip1_s32(raw, vdup_n_s32(0)),
-					   vzip2_s32(raw, vdup_n_s32(0)));
+		int32x2x2_t z = vzip_s32(raw, vdup_n_s32(0));
+		int32x4_t s = vcombine_s32(z.val[0], z.val[1]);
 		int32x4_t out = vld1q_s32(lp + i * 2);
 		vst1q_s32(lp + i * 2, vaddq_s32(out, vmulq_s32(s, vol)));
 	}
@@ -141,6 +213,7 @@ static inline void mix_block_single(mix_t *sp, int32 *lp,
 			_mm_add_epi32(out, _mm_mullo_epi32(s, vol)));
 	}
 #endif
+#endif /* USE_FLOAT_MIXING */
 	for (; i < count; i++)
 		lp[i * 2] += left * sp[i];
 }
@@ -149,6 +222,28 @@ static inline void mix_block_single(mix_t *sp, int32 *lp,
 static inline void mix_block_mono(mix_t *sp, int32 *lp,
 		int32 left, int count)
 {
+#ifdef USE_FLOAT_MIXING
+#ifdef USE_NEON
+	float32x4_t vol = vdupq_n_f32((float)left);
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		float32x4_t samples = vld1q_f32(sp + i);
+		int32x4_t prod = vcvtq_s32_f32(vmulq_f32(samples, vol));
+		int32x4_t out = vld1q_s32(lp + i);
+		vst1q_s32(lp + i, vaddq_s32(out, prod));
+	}
+#else
+	__m128 vol = _mm_set1_ps((float)left);
+	int i = 0;
+	for (; i + 3 < count; i += 4) {
+		__m128 samples = _mm_loadu_ps(sp + i);
+		__m128i prod = _mm_cvttps_epi32(_mm_mul_ps(samples, vol));
+		__m128i out = _mm_loadu_si128((__m128i *)(lp + i));
+		_mm_storeu_si128((__m128i *)(lp + i),
+			_mm_add_epi32(out, prod));
+	}
+#endif
+#else /* int32 mixing */
 #ifdef USE_NEON
 	int32x4_t vol = vdupq_n_s32(left);
 	int i = 0;
@@ -167,6 +262,7 @@ static inline void mix_block_mono(mix_t *sp, int32 *lp,
 			_mm_add_epi32(out, _mm_mullo_epi32(samples, vol)));
 	}
 #endif
+#endif /* USE_FLOAT_MIXING */
 	for (; i < count; i++)
 		lp[i] += left * sp[i];
 }
@@ -279,9 +375,44 @@ static inline int do_voice_filter(int v, resample_t *sp, mix_t *lp, int32 count)
 #endif
 {
 	FilterCoefficients *fc = &(voice[v].fc);
+#ifdef USE_FLOAT_MIXING
+	int32 i;
+	float f, q, p, b0, b1, b2, b3, b4, t1, t2, x;
+
+	if (fc->type == 1) {	/* Chamberlin's lowpass filter */
+		recalc_voice_resonance(v);
+		recalc_voice_fc(v);
+		f = fc->f, q = fc->q, b0 = fc->b0, b1 = fc->b1, b2 = fc->b2;
+		for(i = 0; i < count; i++) {
+			b0 = b0 + b2 * f;
+			b1 = sp[i] - b0 - b2 * q;
+			b2 = b1 * f + b2;
+			lp[i] = b0;
+		}
+		fc->b0 = b0, fc->b1 = b1, fc->b2 = b2;
+		return 1;
+	} else if(fc->type == 2) {	/* Moog lowpass VCF */
+		recalc_voice_resonance(v);
+		recalc_voice_fc(v);
+		f = fc->f, q = fc->q, p = fc->p, b0 = fc->b0, b1 = fc->b1,
+			b2 = fc->b2, b3 = fc->b3, b4 = fc->b4;
+		for(i = 0; i < count; i++) {
+			x = sp[i] - q * b4;		/* feedback */
+			t1 = b1;  b1 = (x + b0) * p - b1 * f;
+			t2 = b2;  b2 = (b1 + t1) * p - b2 * f;
+			t1 = b3;  b3 = (b2 + t2) * p - b3 * f;
+			lp[i] = b4 = (b3 + t1) * p - b4 * f;
+			b0 = x;
+		}
+		fc->b0 = b0, fc->b1 = b1, fc->b2 = b2, fc->b3 = b3, fc->b4 = b4;
+		return 1;
+	} else {
+		return 0;
+	}
+#else
 	int32 i, f, q, p, b0, b1, b2, b3, b4, t1, t2, x;
-	
-	if (fc->type == 1) {	/* copy with applying Chamberlin's lowpass filter. */
+
+	if (fc->type == 1) {	/* Chamberlin's lowpass filter */
 		recalc_voice_resonance(v);
 		recalc_voice_fc(v);
 		f = fc->f, q = fc->q, b0 = fc->b0, b1 = fc->b1, b2 = fc->b2;
@@ -293,7 +424,7 @@ static inline int do_voice_filter(int v, resample_t *sp, mix_t *lp, int32 count)
 		}
 		fc->b0 = b0, fc->b1 = b1, fc->b2 = b2;
 		return 1;
-	} else if(fc->type == 2) {	/* copy with applying Moog lowpass VCF. */
+	} else if(fc->type == 2) {	/* Moog lowpass VCF */
 		recalc_voice_resonance(v);
 		recalc_voice_fc(v);
 		f = fc->f, q = fc->q, p = fc->p, b0 = fc->b0, b1 = fc->b1,
@@ -311,6 +442,7 @@ static inline int do_voice_filter(int v, resample_t *sp, mix_t *lp, int32 count)
 	} else {
 		return 0;
 	}
+#endif
 }
 
 //#define MOOG_RESONANCE_MAX 0.897638f
@@ -320,13 +452,17 @@ static inline void recalc_voice_resonance(int v)
 {
 	double q;
 	FilterCoefficients *fc = &(voice[v].fc);
-	
+
 	if (fc->reso_dB != fc->last_reso_dB || fc->q == 0) {
 		fc->last_reso_dB = fc->reso_dB;
 		if(fc->type == 1) {
 			q = 1.0 / chamberlin_filter_db_to_q_table[(int)(fc->reso_dB * 4)];
+#ifdef USE_FLOAT_MIXING
+			fc->q = (float)q;
+#else
 			fc->q = TIM_FSCALE(q, 24);
 			if(fc->q <= 0) {fc->q = 1;}	/* must never be 0. */
+#endif
 		} else if(fc->type == 2) {
 			fc->reso_lin = fc->reso_dB * MOOG_RESONANCE_MAX / 20.0f;
 			if (fc->reso_lin > MOOG_RESONANCE_MAX) {fc->reso_lin = MOOG_RESONANCE_MAX;}
@@ -344,16 +480,26 @@ static inline void recalc_voice_fc(int v)
 	if (fc->freq != fc->last_freq) {
 		if(fc->type == 1) {
 			f = 2.0 * sin(M_PI * (double)fc->freq / (double)play_mode->rate);
+#ifdef USE_FLOAT_MIXING
+			fc->f = (float)f;
+#else
 			fc->f = TIM_FSCALE(f, 24);
+#endif
 		} else if(fc->type == 2) {
 			fr = 2.0 * (double)fc->freq / (double)play_mode->rate;
 			q = 1.0 - fr;
 			p = fr + 0.8 * fr * q;
 			f = p + p - 1.0;
 			q = fc->reso_lin * (1.0 + 0.5 * q * (1.0 - q + 5.6 * q * q));
+#ifdef USE_FLOAT_MIXING
+			fc->f = (float)f;
+			fc->p = (float)p;
+			fc->q = (float)q;
+#else
 			fc->f = TIM_FSCALE(f, 24);
 			fc->p = TIM_FSCALE(p, 24);
 			fc->q = TIM_FSCALE(q, 24);
+#endif
 		}
 		fc->last_freq = fc->freq;
 	}

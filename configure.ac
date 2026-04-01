@@ -1363,6 +1363,24 @@ else
   AC_MSG_RESULT(no)
 fi
 
+dnl Float mixing (default: yes when PipeWire is enabled)
+AC_ARG_ENABLE(float-mixing,
+  AS_HELP_STRING([--enable-float-mixing], [Use float32 for internal mixing (default: yes with PipeWire)]),
+  [enable_float_mixing="$enableval"],
+  [if test "x$au_enable_pipewire" = xyes; then
+     enable_float_mixing=yes
+   else
+     enable_float_mixing=no
+   fi])
+AC_MSG_CHECKING(whether to use float32 internal mixing)
+if test "x$enable_float_mixing" = xyes; then
+  AC_MSG_RESULT(yes)
+  AC_DEFINE(USE_FLOAT_MIXING,1,Define to use float32 for internal mixing pipeline.)
+  EXTRACFLAGS="$EXTRACFLAGS -O3 -ffast-math"
+else
+  AC_MSG_RESULT(no)
+fi
+
 dnl AO
 AC_MSG_CHECKING(enable_audio=ao)
 if test "x$au_enable_ao" = xyes; then
@@ -1967,8 +1985,10 @@ CONFIG_INTERFACE(pipewiresyn,PIPEWIRESYN,p,
   AS_HELP_STRING([--enable-pipewiresyn], [Enable PipeWire Synthesizer interface
                                                           (default is no)]),
   [ INTERFACE_SRCS="$INTERFACE_SRCS pipewire_c.c"
-    EXTRALIBS="$EXTRALIBS $(${PKG_CONFIG} --libs libpipewire-0.3)"
-    EXTRADEFS="$EXTRADEFS $(${PKG_CONFIG} --cflags libpipewire-0.3)"
+    if test "x$au_enable_pipewire" != xyes; then
+      EXTRALIBS="$EXTRALIBS $(${PKG_CONFIG} --libs libpipewire-0.3)"
+      EXTRADEFS="$EXTRADEFS $(${PKG_CONFIG} --cflags libpipewire-0.3)"
+    fi
   ],
   [ MY_DEFINE(IA_PIPEWIRESYN)
   ])
@@ -2280,7 +2300,7 @@ AM_CONDITIONAL(W32READDIR, test "x$W32READDIR" = "xyes")
 # SET_UNIQ_WORDS(CPPFLAGS,$CPPFLAGS $EXTRADEFS)
 LDFLAGS="$LDFLAGS"
 SHLDFLAGS="$SHLDFLAGS"
-CFLAGS="$EXTRACFLAGS $CFLAGS"
+CFLAGS="$CFLAGS $EXTRACFLAGS"
 CPPFLAGS="$CPPFLAGS $EXTRADEFS"
 
 if test "x$oss_device" != x; then

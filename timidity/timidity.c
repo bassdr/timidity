@@ -327,6 +327,7 @@ static const struct option longopts[] = {
 	{ "output-16bit",           no_argument,       NULL, TIM_OPT_OUTPUT_BITWIDTH },
 	{ "output-24bit",           no_argument,       NULL, TIM_OPT_OUTPUT_BITWIDTH },
 	{ "output-8bit",            no_argument,       NULL, TIM_OPT_OUTPUT_BITWIDTH },
+	{ "output-f32bit",          no_argument,       NULL, TIM_OPT_OUTPUT_BITWIDTH },
 	{ "output-linear",          no_argument,       NULL, TIM_OPT_OUTPUT_FORMAT },
 	{ "output-ulaw",            no_argument,       NULL, TIM_OPT_OUTPUT_FORMAT },
 	{ "output-alaw",            no_argument,       NULL, TIM_OPT_OUTPUT_FORMAT },
@@ -2888,6 +2889,8 @@ MAIN_INTERFACE int set_tim_opt_long(int c, char *optarg, int index)
 			arg = "24bit";
 		else if (! strcmp(the_option->name, "output-8bit"))
 			arg = "8bit";
+		else if (! strcmp(the_option->name, "output-f32bit"))
+			arg = "f32bit";
 		return parse_opt_output_bitwidth(arg);
 	case TIM_OPT_OUTPUT_FORMAT:
 		if (! strcmp(the_option->name, "output-linear"))
@@ -4288,6 +4291,7 @@ static int parse_opt_h(const char *arg)
 "  `u'          unsigned output" NLS
 "  `1'          16-bit sample width" NLS
 "  `2'          24-bit sample width" NLS
+"  `f'          32-bit float sample" NLS
 "  `8'          8-bit sample width" NLS
 "  `l'          linear encoding" NLS
 "  `U'          U-Law encoding" NLS
@@ -4301,6 +4305,7 @@ static int parse_opt_h(const char *arg)
 "  --output-unsigned" NLS
 "  --output-16bit" NLS
 "  --output-24bit" NLS
+"  --output-f32bit" NLS
 "  --output-8bit" NLS
 "  --output-linear" NLS
 "  --output-ulaw" NLS
@@ -4671,14 +4676,18 @@ static inline int parse_opt_O(const char *arg)
 			break;
 		case '1':	/* 1 for 16-bit */
 			pmp->encoding |= PE_16BIT;
-			pmp->encoding &= ~(PE_24BIT | PE_ULAW | PE_ALAW);
+			pmp->encoding &= ~(PE_F32BIT | PE_24BIT | PE_ULAW | PE_ALAW);
 			break;
 		case '2':	/* 2 for 24-bit */
 			pmp->encoding |= PE_24BIT;
-			pmp->encoding &= ~(PE_16BIT | PE_ULAW | PE_ALAW);
+			pmp->encoding &= ~(PE_F32BIT | PE_16BIT | PE_ULAW | PE_ALAW);
+			break;
+		case 'f':	/* f for float32 */
+			pmp->encoding |= PE_F32BIT | PE_SIGNED;
+			pmp->encoding &= ~(PE_24BIT | PE_16BIT | PE_ULAW | PE_ALAW);
 			break;
 		case '8':
-			pmp->encoding &= ~(PE_16BIT | PE_24BIT);
+			pmp->encoding &= ~(PE_F32BIT | PE_16BIT | PE_24BIT);
 			break;
 		case 'l':	/* linear */
 			pmp->encoding &= ~(PE_ULAW | PE_ALAW);
@@ -4686,12 +4695,12 @@ static inline int parse_opt_O(const char *arg)
 		case 'U':	/* uLaw */
 			pmp->encoding |= PE_ULAW;
 			pmp->encoding &= ~(PE_SIGNED
-					| PE_16BIT | PE_24BIT | PE_ALAW | PE_BYTESWAP);
+					| PE_F32BIT | PE_16BIT | PE_24BIT | PE_ALAW | PE_BYTESWAP);
 			break;
 		case 'A':	/* aLaw */
 			pmp->encoding |= PE_ALAW;
 			pmp->encoding &= ~(PE_SIGNED
-					| PE_16BIT | PE_24BIT | PE_ULAW | PE_BYTESWAP);
+					| PE_F32BIT | PE_16BIT | PE_24BIT | PE_ULAW | PE_BYTESWAP);
 			break;
 		case 'x':
 			pmp->encoding ^= PE_BYTESWAP;	/* toggle */
@@ -4731,18 +4740,22 @@ static inline int parse_opt_output_signed(const char *arg)
 
 static inline int parse_opt_output_bitwidth(const char *arg)
 {
-	/* --output-16bit, --output-24bit, --output-8bit */
+	/* --output-16bit, --output-24bit, --output-f32bit, --output-8bit */
 	switch (*arg) {
 	case '1':	/* 16bit */
 		play_mode->encoding |= PE_16BIT;
-		play_mode->encoding &= ~(PE_24BIT | PE_ULAW | PE_ALAW);
+		play_mode->encoding &= ~(PE_F32BIT | PE_24BIT | PE_ULAW | PE_ALAW);
 		return 0;
 	case '2':	/* 24bit */
 		play_mode->encoding |= PE_24BIT;
-		play_mode->encoding &= ~(PE_16BIT | PE_ULAW | PE_ALAW);
+		play_mode->encoding &= ~(PE_F32BIT | PE_16BIT | PE_ULAW | PE_ALAW);
+		return 0;
+	case 'f':	/* f32bit (float) */
+		play_mode->encoding |= PE_F32BIT | PE_SIGNED;
+		play_mode->encoding &= ~(PE_24BIT | PE_16BIT | PE_ULAW | PE_ALAW);
 		return 0;
 	case '8':	/* 8bit */
-		play_mode->encoding &= ~(PE_16BIT | PE_24BIT);
+		play_mode->encoding &= ~(PE_F32BIT | PE_16BIT | PE_24BIT);
 		return 0;
 	default:
 		ctl->cmsg(CMSG_ERROR, VERB_NORMAL, "Invalid output bitwidth %s", arg);
@@ -4760,12 +4773,12 @@ static inline int parse_opt_output_format(const char *arg)
 	case 'u':	/* uLaw */
 		play_mode->encoding |= PE_ULAW;
 		play_mode->encoding &=
-				~(PE_SIGNED | PE_16BIT | PE_24BIT | PE_ALAW | PE_BYTESWAP);
+				~(PE_SIGNED | PE_F32BIT | PE_16BIT | PE_24BIT | PE_ALAW | PE_BYTESWAP);
 		return 0;
 	case 'a':	/* aLaw */
 		play_mode->encoding |= PE_ALAW;
 		play_mode->encoding &=
-				~(PE_SIGNED | PE_16BIT | PE_24BIT | PE_ULAW | PE_BYTESWAP);
+				~(PE_SIGNED | PE_F32BIT | PE_16BIT | PE_24BIT | PE_ULAW | PE_BYTESWAP);
 		return 0;
 	default:
 		ctl->cmsg(CMSG_ERROR, VERB_NORMAL, "Invalid output format %s", arg);

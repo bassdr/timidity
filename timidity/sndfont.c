@@ -176,6 +176,13 @@ typedef struct _SFInsts {
 #define TRUE 1
 #endif /* TRUE */
 
+/* SF2 modulator context passed through the loading call chain */
+typedef struct _SFMods {
+    SFModRec *preset_global;  int n_preset_global;
+    SFModRec *preset_zone;    int n_preset_zone;
+    SFModRec *inst_global;    int n_inst_global;
+    SFModRec *inst_zone;      int n_inst_zone;
+} SFMods;
 
 static SFInsts *find_soundfont(char *sf_file);
 static SFInsts *new_soundfont(char *sf_file);
@@ -187,7 +194,8 @@ static Instrument *load_from_file(SFInsts *rec, InstList *ip);
 static int is_excluded(SFInsts *rec, int bank, int preset, int keynote);
 static int is_ordered(SFInsts *rec, int bank, int preset, int keynote);
 static int load_font(SFInfo *sf, int pridx);
-static int parse_layer(SFInfo *sf, int pridx, LayerTable *tbl, int level);
+static int parse_layer(SFInfo *sf, int pridx, LayerTable *tbl, int level,
+		       SFMods *mods);
 static int is_global(SFGenLayer *layer);
 static void clear_table(LayerTable *tbl);
 static void set_to_table(SFInfo *sf, LayerTable *tbl, SFGenLayer *lay, int level);
@@ -195,10 +203,11 @@ static void add_item_to_table(LayerTable *tbl, int oper, int amount, int level);
 static void merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src);
 static void init_and_merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src);
 static int sanity_range(LayerTable *tbl);
-static int make_patch(SFInfo *sf, int pridx, LayerTable *tbl);
-static void make_info(SFInfo *sf, SampleList *vp, LayerTable *tbl);
+static int make_patch(SFInfo *sf, int pridx, LayerTable *tbl, SFMods *mods);
+static void make_info(SFInfo *sf, SampleList *vp, LayerTable *tbl, SFMods *mods);
 static FLOAT_T calc_volume(LayerTable *tbl);
-static void set_sample_info(SFInfo *sf, SampleList *vp, LayerTable *tbl);
+static void set_sample_info(SFInfo *sf, SampleList *vp, LayerTable *tbl,
+			    SFMods *mods);
 static void set_init_info(SFInfo *sf, SampleList *vp, LayerTable *tbl);
 static void reset_last_sample_info(void);
 static int abscent_to_Hz(int abscents);
@@ -212,6 +221,7 @@ static int32 calc_sustain(int sust_cB);
 static void convert_volume_envelope(SampleList *vp, LayerTable *tbl);
 static void convert_tremolo(SampleList *vp, LayerTable *tbl);
 static void convert_vibrato(SampleList *vp, LayerTable *tbl);
+static void resolve_modulators(SFMods *mods, Sample *sp);
 
 /*----------------------------------------------------------------*/
 
@@ -805,15 +815,25 @@ static int load_font(SFInfo *sf, int pridx)
 	/* parse for each preset layer */
 	for (j = 0; j < nlayers; j++, layp++) {
 		LayerTable tbl;
+		SFMods mods;
 
 		/* set up table */
 		clear_table(&tbl);
 		if (globalp)
 			set_to_table(sf, &tbl, globalp, P_GLOBAL);
 		set_to_table(sf, &tbl, layp, P_LAYER);
-		
+
+		/* set up preset-level modulators */
+		memset(&mods, 0, sizeof(mods));
+		if (globalp) {
+			mods.preset_global = globalp->mods;
+			mods.n_preset_global = globalp->nmods;
+		}
+		mods.preset_zone = layp->mods;
+		mods.n_preset_zone = layp->nmods;
+
 		/* parse the instrument */
-		rc = parse_layer(sf, pridx, &tbl, 0);
+		rc = parse_layer(sf, pridx, &tbl, 0, &mods);
 		if(rc == AWE_RET_ERR || rc == AWE_RET_NOMEM)
 			return rc;
 	}
@@ -825,7 +845,8 @@ static int load_font(SFInfo *sf, int pridx)
 /*----------------------------------------------------------------*/
 
 /* parse a preset layer and convert it to the patch structure */
-static int parse_layer(SFInfo *sf, int pridx, LayerTable *tbl, int level)
+static int parse_layer(SFInfo *sf, int pridx, LayerTable *tbl, int level,
+		       SFMods *mods)
 {
 	SFInstHdr *inst;
 	int rc, i, nlayers;
@@ -873,17 +894,28 @@ static int parse_layer(SFInfo *sf, int pridx, LayerTable *tbl, int level)
 	/* parse for each layer */
 	for (i = 0; i < nlayers; i++, lay++) {
 		LayerTable ctbl;
+		SFMods zone_mods;
+
 		clear_table(&ctbl);
 		if (globalp)
 			set_to_table(sf, &ctbl, globalp, P_GLOBAL);
 		set_to_table(sf, &ctbl, lay, P_LAYER);
+
+		/* set up instrument-level modulators */
+		zone_mods = *mods;
+		if (globalp) {
+			zone_mods.inst_global = globalp->mods;
+			zone_mods.n_inst_global = globalp->nmods;
+		}
+		zone_mods.inst_zone = lay->mods;
+		zone_mods.n_inst_zone = lay->nmods;
 
 		if (!ctbl.set[SF_sampleId]) {
 			/* recursive loading */
 			merge_table(sf, &ctbl, tbl);
 			if (! sanity_range(&ctbl))
 				continue;
-			rc = parse_layer(sf, pridx, &ctbl, level+1);
+			rc = parse_layer(sf, pridx, &ctbl, level+1, &zone_mods);
 			if (rc != AWE_RET_OK && rc != AWE_RET_SKIP)
 				return rc;
 
@@ -894,7 +926,8 @@ static int parse_layer(SFInfo *sf, int pridx, LayerTable *tbl, int level)
 				continue;
 
 			/* load the info data */
-			if ((rc = make_patch(sf, pridx, &ctbl)) == AWE_RET_ERR)
+			if ((rc = make_patch(sf, pridx, &ctbl,
+					     &zone_mods)) == AWE_RET_ERR)
 				return rc;
 		}
 	}
@@ -1056,7 +1089,7 @@ int opt_reverb_control, opt_surround_chorus;	/* to avoid warning. */
 static int cfg_for_sf_scan(char *name, int x_bank, int x_preset, int x_keynote_from, int x_keynote_to, int romflag);
 #endif
 
-static int make_patch(SFInfo *sf, int pridx, LayerTable *tbl)
+static int make_patch(SFInfo *sf, int pridx, LayerTable *tbl, SFMods *mods)
 {
     int bank, preset, keynote;
     int keynote_from, keynote_to, done;
@@ -1139,7 +1172,7 @@ static int make_patch(SFInfo *sf, int pridx, LayerTable *tbl)
 	} else if(bank == 128) {
 		sp->v.note_to_use = keynote;
 	}
-    make_info(sf, sp, tbl);
+    make_info(sf, sp, tbl, mods);
 
     /* add a sample */
     if(ip->slist == NULL)
@@ -1186,9 +1219,9 @@ static int make_patch(SFInfo *sf, int pridx, LayerTable *tbl)
  */
 
 /* conver to Sample parameter */
-static void make_info(SFInfo *sf, SampleList *vp, LayerTable *tbl)
+static void make_info(SFInfo *sf, SampleList *vp, LayerTable *tbl, SFMods *mods)
 {
-	set_sample_info(sf, vp, tbl);
+	set_sample_info(sf, vp, tbl, mods);
 	set_init_info(sf, vp, tbl);
 	set_rootkey(sf, vp, tbl);
 	set_rootfreq(vp);
@@ -1245,7 +1278,8 @@ static void set_envelope_parameters(SampleList *vp)
 }
 
 /* set sample address */
-static void set_sample_info(SFInfo *sf, SampleList *vp, LayerTable *tbl)
+static void set_sample_info(SFInfo *sf, SampleList *vp, LayerTable *tbl,
+			    SFMods *mods)
 {
     SFSampleInfo *sp = &sf->sample[tbl->val[SF_sampleId]];
     int32 len;
@@ -1322,13 +1356,8 @@ static void set_sample_info(SFInfo *sf, SampleList *vp, LayerTable *tbl)
     vp->start = vp->start * 2 + sf->samplepos;
     vp->len *= 2;
 
-	vp->v.vel_to_fc = -2400;	/* SF2 default value */
-	vp->v.key_to_fc = vp->v.vel_to_resonance = 0;
-	vp->v.envelope_velf_bpo = vp->v.modenv_velf_bpo =
-		vp->v.vel_to_fc_threshold = 64;
-	vp->v.key_to_fc_bpo = 60;
-	memset(vp->v.envelope_velf, 0, sizeof(vp->v.envelope_velf));
-	memset(vp->v.modenv_velf, 0, sizeof(vp->v.modenv_velf));
+	/* resolve SF2 modulators into Sample fields */
+	resolve_modulators(mods, &vp->v);
 
 	vp->v.inst_type = INST_SF2;
 }
@@ -1576,6 +1605,364 @@ static void set_rootfreq(SampleList *vp)
 		vp->v.scale_freq = root;	/* scale freq */
 	}
 }
+
+/*----------------------------------------------------------------
+ * SF2 modulator resolution
+ *
+ * Resolves SF2 default modulators + file-specific modulators (IMOD/PMOD)
+ * into flat Sample struct fields.
+ *
+ * Per SF2 spec section 9.5.1:
+ * - Instrument zone mods override instrument global mods (matching identity)
+ * - Instrument-level mods replace matching default modulators
+ * - Preset zone mods override preset global mods (matching identity)
+ * - Preset-level mods ADD to the instrument-level amount
+ *
+ * Two modulators are "identical" if they share the same src_oper,
+ * dest_oper, amt_src_oper, and transform.
+ *----------------------------------------------------------------*/
+
+/* SF2 default modulators (spec section 8.4.1-8.4.10) */
+static const SFModRec sf2_default_mods[] = {
+	/* #1: Note-On Velocity -> Initial Attenuation (960 cB, concave neg unipolar) */
+	{ SF_MOD_NOTE_ON_VEL | SF_MOD_TYPE_CONCAVE | SF_MOD_DIR_NEGATIVE,
+	  SF_initAtten, 960, 0, 0 },
+	/* #2: Note-On Velocity -> Initial Filter Cutoff (-2400 cents, linear neg unipolar) */
+	{ SF_MOD_NOTE_ON_VEL | SF_MOD_TYPE_LINEAR | SF_MOD_DIR_NEGATIVE,
+	  SF_initialFilterFc, -2400, 0, 0 },
+	/* #3: Channel Pressure -> Vibrato LFO Pitch Depth (50 cents) */
+	{ SF_MOD_CHAN_PRESSURE | SF_MOD_TYPE_LINEAR,
+	  SF_lfo2ToPitch, 50, 0, 0 },
+	/* #4: CC1 (Mod Wheel) -> Vibrato LFO Pitch Depth (50 cents) */
+	{ 1 | SF_MOD_CC_FLAG | SF_MOD_TYPE_LINEAR,
+	  SF_lfo2ToPitch, 50, 0, 0 },
+	/* #5: CC7 (Volume) -> Initial Attenuation (960 cB, concave neg unipolar) */
+	{ 7 | SF_MOD_CC_FLAG | SF_MOD_TYPE_CONCAVE | SF_MOD_DIR_NEGATIVE,
+	  SF_initAtten, 960, 0, 0 },
+	/* #6: CC10 (Pan) -> Pan Position (1000, linear bipolar) */
+	{ 10 | SF_MOD_CC_FLAG | SF_MOD_TYPE_LINEAR | SF_MOD_POLAR_BIPOLAR,
+	  SF_panEffectsSend, 500, 0, 0 },
+	/* #7: CC11 (Expression) -> Initial Attenuation (960 cB, concave neg unipolar) */
+	{ 11 | SF_MOD_CC_FLAG | SF_MOD_TYPE_CONCAVE | SF_MOD_DIR_NEGATIVE,
+	  SF_initAtten, 960, 0, 0 },
+	/* #8: Pitch Wheel -> Initial Pitch (12700 cents, linear bipolar, amtSrc=CC16) */
+	{ SF_MOD_PITCH_WHEEL | SF_MOD_TYPE_LINEAR | SF_MOD_POLAR_BIPOLAR,
+	  SF_fineTune, 12700,
+	  SF_MOD_PITCH_WHEEL_SENS | SF_MOD_TYPE_LINEAR, 0 },
+	/* #9: CC91 -> Reverb Effects Send (200) */
+	{ 91 | SF_MOD_CC_FLAG | SF_MOD_TYPE_LINEAR,
+	  SF_reverbEffectsSend, 200, 0, 0 },
+	/* #10: CC93 -> Chorus Effects Send (200) */
+	{ 93 | SF_MOD_CC_FLAG | SF_MOD_TYPE_LINEAR,
+	  SF_chorusEffectsSend, 200, 0, 0 },
+};
+#define NUM_SF2_DEFAULT_MODS (sizeof(sf2_default_mods) / sizeof(sf2_default_mods[0]))
+
+/* Check if two modulators have the same identity (same routing) */
+static int mod_identity_match(const SFModRec *a, const SFModRec *b)
+{
+	return a->src_oper == b->src_oper &&
+	       a->dest_oper == b->dest_oper &&
+	       a->amt_src_oper == b->amt_src_oper &&
+	       a->transform == b->transform;
+}
+
+/* Find a modulator with matching identity in a list. Returns amount or 0 if not found.
+ * Sets *found to 1 if found, 0 if not. */
+static int16 find_mod_amount(const SFModRec *list, int nlist,
+			     const SFModRec *target, int *found)
+{
+	int i;
+	for (i = 0; i < nlist; i++) {
+		if (mod_identity_match(&list[i], target)) {
+			*found = 1;
+			return list[i].amount;
+		}
+	}
+	*found = 0;
+	return 0;
+}
+
+/* Resolve a single modulator through the SF2 layer hierarchy.
+ * Returns the final resolved amount. */
+static int16 resolve_single_mod(const SFModRec *mod, int16 default_amount,
+				SFMods *mods)
+{
+	int16 amount = default_amount;
+	int found;
+
+	/* Instrument global mods override defaults */
+	if (mods->n_inst_global > 0) {
+		int16 val = find_mod_amount(mods->inst_global,
+					    mods->n_inst_global, mod, &found);
+		if (found)
+			amount = val;
+	}
+
+	/* Instrument zone mods override global/defaults */
+	if (mods->n_inst_zone > 0) {
+		int16 val = find_mod_amount(mods->inst_zone,
+					    mods->n_inst_zone, mod, &found);
+		if (found)
+			amount = val;
+	}
+
+	/* Preset global mods ADD to instrument-level amount */
+	if (mods->n_preset_global > 0) {
+		int16 val = find_mod_amount(mods->preset_global,
+					    mods->n_preset_global, mod, &found);
+		if (found)
+			amount += val;
+	}
+
+	/* Preset zone mods: if matching preset global exists, zone overrides it
+	 * then adds to instrument amount. If no preset global match, zone adds
+	 * directly. */
+	if (mods->n_preset_zone > 0) {
+		int16 val = find_mod_amount(mods->preset_zone,
+					    mods->n_preset_zone, mod, &found);
+		if (found) {
+			/* Check if there was a matching preset global mod */
+			int had_global = 0;
+			if (mods->n_preset_global > 0)
+				find_mod_amount(mods->preset_global,
+						mods->n_preset_global,
+						mod, &had_global);
+			if (had_global) {
+				/* Zone overrides global: subtract global, add zone */
+				int16 gval = find_mod_amount(mods->preset_global,
+							     mods->n_preset_global,
+							     mod, &had_global);
+				amount = amount - gval + val;
+			} else {
+				amount += val;
+			}
+		}
+	}
+
+	return amount;
+}
+
+/* Check if a modulator source uses note-on velocity */
+static int mod_src_is_velocity(uint16 src_oper)
+{
+	return !(src_oper & SF_MOD_CC_FLAG) &&
+	       (src_oper & SF_MOD_INDEX_MASK) == SF_MOD_NOTE_ON_VEL;
+}
+
+/* Check if a modulator source uses note-on key number */
+static int mod_src_is_key(uint16 src_oper)
+{
+	return !(src_oper & SF_MOD_CC_FLAG) &&
+	       (src_oper & SF_MOD_INDEX_MASK) == SF_MOD_NOTE_ON_KEY;
+}
+
+/* Check if a modulator source uses a linear curve.
+ * Non-linear curves (concave, convex, switch) can't be accurately
+ * represented by the existing Sample fields which apply linearly. */
+static int mod_src_is_linear(uint16 src_oper)
+{
+	return (src_oper & SF_MOD_TYPE_MASK) == SF_MOD_TYPE_LINEAR;
+}
+
+/* Process a resolved modulator and map it to Sample fields.
+ * Amounts are ADDED to existing values since multiple SF2 modulators
+ * can target the same generator and their outputs sum at runtime.
+ * Returns 1 if handled, 0 if skipped. */
+static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
+{
+	if (amount == 0)
+		return 1; /* effectively disabled, nothing to do */
+
+	/* Only handle single-source modulators with no secondary source */
+	if (mod->amt_src_oper != 0)
+		return 0;
+
+	/* Only handle linear-curve sources -- non-linear curves (concave,
+	 * convex, switch) can't be represented by the existing fields */
+	if (!mod_src_is_linear(mod->src_oper))
+		return 0;
+
+	if (mod_src_is_velocity(mod->src_oper)) {
+		switch (mod->dest_oper) {
+		case SF_initialFilterFc:
+			sp->vel_to_fc += amount;
+			return 1;
+		case SF_initialFilterQ:
+			sp->vel_to_resonance += amount;
+			return 1;
+		case SF_attackEnv2:
+			sp->envelope_velf[0] += amount;
+			return 1;
+		case SF_holdEnv2:
+			sp->envelope_velf[1] += amount;
+			return 1;
+		case SF_decayEnv2:
+			sp->envelope_velf[2] += amount;
+			return 1;
+		case SF_releaseEnv2:
+			sp->envelope_velf[4] += amount;
+			return 1;
+		case SF_attackEnv1:
+			sp->modenv_velf[0] += amount;
+			return 1;
+		case SF_holdEnv1:
+			sp->modenv_velf[1] += amount;
+			return 1;
+		case SF_decayEnv1:
+			sp->modenv_velf[2] += amount;
+			return 1;
+		case SF_releaseEnv1:
+			sp->modenv_velf[4] += amount;
+			return 1;
+		}
+	} else if (mod_src_is_key(mod->src_oper)) {
+		switch (mod->dest_oper) {
+		case SF_initialFilterFc:
+			sp->key_to_fc += amount;
+			return 1;
+		}
+	}
+
+	return 0; /* unhandled */
+}
+
+/* Check if a modulator matches any SF2 default */
+static int is_default_mod(const SFModRec *mod)
+{
+	int i;
+	for (i = 0; i < (int)NUM_SF2_DEFAULT_MODS; i++) {
+		if (mod_identity_match(mod, &sf2_default_mods[i]))
+			return 1;
+	}
+	return 0;
+}
+
+/* Resolve a custom (non-default) instrument-level modulator amount,
+ * then add preset-level contributions. */
+static int16 resolve_custom_mod(const SFModRec *mod, int16 inst_amount,
+				SFMods *mods)
+{
+	int16 preset_amount = 0;
+	int found;
+
+	/* Preset global adds to instrument amount */
+	if (mods->n_preset_global > 0) {
+		int16 gval = find_mod_amount(mods->preset_global,
+					     mods->n_preset_global,
+					     mod, &found);
+		if (found)
+			preset_amount = gval;
+	}
+	/* Preset zone overrides preset global, then adds to instrument */
+	if (mods->n_preset_zone > 0) {
+		int16 zval = find_mod_amount(mods->preset_zone,
+					     mods->n_preset_zone,
+					     mod, &found);
+		if (found)
+			preset_amount = zval;
+	}
+
+	return inst_amount + preset_amount;
+}
+
+static void resolve_modulators(SFMods *mods, Sample *sp)
+{
+	int i, found;
+
+	/* Set defaults that don't come from modulators */
+	sp->envelope_velf_bpo = sp->modenv_velf_bpo =
+		sp->vel_to_fc_threshold = 64;
+	sp->key_to_fc_bpo = 60;
+	sp->vel_to_fc = 0;
+	sp->key_to_fc = 0;
+	sp->vel_to_resonance = 0;
+	memset(sp->envelope_velf, 0, sizeof(sp->envelope_velf));
+	memset(sp->modenv_velf, 0, sizeof(sp->modenv_velf));
+
+	/* Phase 1: Process SF2 default modulators through the full hierarchy */
+	for (i = 0; i < (int)NUM_SF2_DEFAULT_MODS; i++) {
+		const SFModRec *def = &sf2_default_mods[i];
+		int16 amount = resolve_single_mod(def, def->amount, mods);
+		apply_mod_to_sample(def, amount, sp);
+	}
+
+	/* Phase 2: Process custom instrument zone modulators.
+	 * Zone mods are authoritative at the instrument level. */
+	for (i = 0; i < mods->n_inst_zone; i++) {
+		const SFModRec *mod = &mods->inst_zone[i];
+		if (is_default_mod(mod))
+			continue;
+		apply_mod_to_sample(mod,
+			resolve_custom_mod(mod, mod->amount, mods), sp);
+	}
+
+	/* Phase 3: Process custom instrument global modulators,
+	 * but only those not overridden by a zone mod. */
+	for (i = 0; i < mods->n_inst_global; i++) {
+		const SFModRec *mod = &mods->inst_global[i];
+		if (is_default_mod(mod))
+			continue;
+		/* Skip if overridden by zone mod */
+		if (mods->n_inst_zone > 0) {
+			find_mod_amount(mods->inst_zone, mods->n_inst_zone,
+					mod, &found);
+			if (found)
+				continue;
+		}
+		apply_mod_to_sample(mod,
+			resolve_custom_mod(mod, mod->amount, mods), sp);
+	}
+
+	/* Phase 4: Process preset-only modulators (no matching instrument mod).
+	 * These add to an implicit instrument-level amount of 0. */
+	for (i = 0; i < mods->n_preset_zone; i++) {
+		const SFModRec *mod = &mods->preset_zone[i];
+		if (is_default_mod(mod))
+			continue;
+		/* Skip if already handled via instrument level */
+		if (mods->n_inst_zone > 0) {
+			find_mod_amount(mods->inst_zone, mods->n_inst_zone,
+					mod, &found);
+			if (found)
+				continue;
+		}
+		if (mods->n_inst_global > 0) {
+			find_mod_amount(mods->inst_global, mods->n_inst_global,
+					mod, &found);
+			if (found)
+				continue;
+		}
+		apply_mod_to_sample(mod, mod->amount, sp);
+	}
+
+	/* Preset global-only mods (no matching zone, instrument, or default) */
+	for (i = 0; i < mods->n_preset_global; i++) {
+		const SFModRec *mod = &mods->preset_global[i];
+		if (is_default_mod(mod))
+			continue;
+		if (mods->n_inst_zone > 0) {
+			find_mod_amount(mods->inst_zone, mods->n_inst_zone,
+					mod, &found);
+			if (found)
+				continue;
+		}
+		if (mods->n_inst_global > 0) {
+			find_mod_amount(mods->inst_global, mods->n_inst_global,
+					mod, &found);
+			if (found)
+				continue;
+		}
+		if (mods->n_preset_zone > 0) {
+			find_mod_amount(mods->preset_zone, mods->n_preset_zone,
+					mod, &found);
+			if (found)
+				continue;
+		}
+		apply_mod_to_sample(mod, mod->amount, sp);
+	}
+}
+
 
 /*----------------------------------------------------------------*/
 

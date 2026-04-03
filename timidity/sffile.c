@@ -67,8 +67,11 @@ extern int progbase;
 typedef struct _SFBags {
 	int nbags;
 	uint16 *bag;
+	uint16 *modbag;
 	int ngens;
 	SFGenRec *gen;
+	int nmods;
+	SFModRec *mod;
 } SFBags;
 
 static SFBags prbags, inbags;
@@ -139,6 +142,7 @@ static void load_preset_header(uint32 size, SFInfo *sf, struct timidity_file *fd
 static void load_inst_header(uint32 size, SFInfo *sf, struct timidity_file *fd);
 static void load_bag(uint32 size, SFBags *bagp, struct timidity_file *fd);
 static void load_gen(uint32 size, SFBags *bagp, struct timidity_file *fd);
+static void load_mod(uint32 size, SFBags *bagp, struct timidity_file *fd);
 static void load_sample_info(uint32 size, SFInfo *sf, struct timidity_file *fd);
 static void convert_layers(SFInfo *sf);
 static void generate_layers(SFHeader *hdr, SFHeader *next, SFBags *bags);
@@ -184,6 +188,8 @@ int load_soundfont(SFInfo *sf, struct timidity_file *fd)
 
 	prbags.bag = inbags.bag = NULL;
 	prbags.gen = inbags.gen = NULL;
+	prbags.modbag = inbags.modbag = NULL;
+	prbags.mod = inbags.mod = NULL;
 
 	/* check RIFF file header */
 	READCHUNK(&chunk, fd);
@@ -226,13 +232,21 @@ int load_soundfont(SFInfo *sf, struct timidity_file *fd)
 	/* free private tables */
 	if (prbags.bag) free(prbags.bag);
 	if (prbags.gen) free(prbags.gen);
+	if (prbags.modbag) free(prbags.modbag);
+	if (prbags.mod) free(prbags.mod);
 	if (inbags.bag) free(inbags.bag);
 	if (inbags.gen) free(inbags.gen);
+	if (inbags.modbag) free(inbags.modbag);
+	if (inbags.mod) free(inbags.mod);
 
 	prbags.bag = NULL;
 	prbags.gen = NULL;
+	prbags.modbag = NULL;
+	prbags.mod = NULL;
 	inbags.bag = NULL;
 	inbags.gen = NULL;
+	inbags.modbag = NULL;
+	inbags.mod = NULL;
 
 	return result;
 }
@@ -497,8 +511,12 @@ static int process_pdta(uint32 size, SFInfo *sf, struct timidity_file *fd)
 		case SHDR_ID:
 			load_sample_info(chunk.size, sf, fd);
 			break;
-		case PMOD_ID: /* ignored */
-		case IMOD_ID: /* ingored */
+		case PMOD_ID:
+			load_mod(chunk.size, &prbags, fd);
+			break;
+		case IMOD_ID:
+			load_mod(chunk.size, &inbags, fd);
+			break;
 		default:
 			FSKIP(chunk.size, fd);
 			break;
@@ -610,9 +628,10 @@ static void load_bag(uint32 size, SFBags *bagp, struct timidity_file *fd)
 
 	size /= 4;
 	bagp->bag = NEW(uint16, size);
+	bagp->modbag = NEW(uint16, size);
 	for (i = 0; i < size; i++) {
 		READW(&bagp->bag[i], fd);
-		SKIPW(fd); /* mod; ignored */
+		READW(&bagp->modbag[i], fd);
 	}
 	bagp->nbags = size;
 }
@@ -633,6 +652,27 @@ static void load_gen(uint32 size, SFBags *bagp, struct timidity_file *fd)
 		READW((uint16 *)&bagp->gen[i].amount, fd);
 	}
 	bagp->ngens = size;
+}
+
+
+/*----------------------------------------------------------------
+ * load preset/instrument modulator list on the private table
+ *----------------------------------------------------------------*/
+
+static void load_mod(uint32 size, SFBags *bagp, struct timidity_file *fd)
+{
+	uint32 i;
+
+	size /= 10; /* each modulator record is 10 bytes */
+	bagp->mod = NEW(SFModRec, size);
+	for (i = 0; i < size; i++) {
+		READW(&bagp->mod[i].src_oper, fd);
+		READW((uint16 *)&bagp->mod[i].dest_oper, fd);
+		READW((uint16 *)&bagp->mod[i].amount, fd);
+		READW(&bagp->mod[i].amt_src_oper, fd);
+		READW(&bagp->mod[i].transform, fd);
+	}
+	bagp->nmods = size;
 }
 
 
@@ -735,7 +775,7 @@ static void generate_layers(SFHeader *hdr, SFHeader *next, SFBags *bags)
 {
 	int i;
 	SFGenLayer *layp;
-	
+
 	hdr->nlayers = next->bagNdx - hdr->bagNdx;
 	if (hdr->nlayers < 0) {
 		ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
@@ -759,6 +799,25 @@ static void generate_layers(SFHeader *hdr, SFHeader *next, SFBags *bags)
 		layp->list = (SFGenRec*)safe_malloc(sizeof(SFGenRec) * layp->nlists);
 		memcpy(layp->list, &bags->gen[genNdx],
 		       sizeof(SFGenRec) * layp->nlists);
+
+		/* copy modulator records */
+		if (bags->mod && bags->modbag) {
+			int modNdx = bags->modbag[i];
+			layp->nmods = bags->modbag[i+1] - modNdx;
+			if (layp->nmods < 0)
+				layp->nmods = 0;
+			if (layp->nmods > 0 && modNdx + layp->nmods <= bags->nmods) {
+				layp->mods = (SFModRec*)safe_malloc(sizeof(SFModRec) * layp->nmods);
+				memcpy(layp->mods, &bags->mod[modNdx],
+				       sizeof(SFModRec) * layp->nmods);
+			} else {
+				layp->nmods = 0;
+				layp->mods = NULL;
+			}
+		} else {
+			layp->nmods = 0;
+			layp->mods = NULL;
+		}
 	}
 }
 
@@ -773,6 +832,8 @@ static void free_layer(SFHeader *hdr)
 		SFGenLayer *layp = &hdr->layer[i];
 		if (layp->nlists >= 0)
 			free(layp->list);
+		if (layp->nmods > 0 && layp->mods)
+			free(layp->mods);
 	}
 	if (hdr->nlayers > 0)
 		free(hdr->layer);

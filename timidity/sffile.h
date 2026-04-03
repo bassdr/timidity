@@ -58,10 +58,41 @@ typedef struct _SFGenRec {
 	int16 amount;
 } SFGenRec;
 
+/* modulator record (SF2 spec section 7.4/7.8) */
+typedef struct _SFModRec {
+	uint16 src_oper;     /* sfModSrcOper: source controller + flags */
+	int16  dest_oper;    /* sfModDestOper: destination generator */
+	int16  amount;       /* modAmount: signed modulation amount */
+	uint16 amt_src_oper; /* sfModAmtSrcOper: second source */
+	uint16 transform;    /* sfModTransOper: 0=linear, 2=abs */
+} SFModRec;
+
+/* SF2 modulator source operand bit fields */
+#define SF_MOD_INDEX_MASK       0x007F
+#define SF_MOD_CC_FLAG          0x0080
+#define SF_MOD_DIR_NEGATIVE     0x0100
+#define SF_MOD_POLAR_BIPOLAR    0x0200
+#define SF_MOD_TYPE_MASK        0xFC00
+#define SF_MOD_TYPE_LINEAR      (0 << 10)
+#define SF_MOD_TYPE_CONCAVE     (1 << 10)
+#define SF_MOD_TYPE_CONVEX      (2 << 10)
+#define SF_MOD_TYPE_SWITCH      (3 << 10)
+
+/* SF2 general controller indices (when CC flag is 0) */
+#define SF_MOD_NONE             0
+#define SF_MOD_NOTE_ON_VEL      2
+#define SF_MOD_NOTE_ON_KEY      3
+#define SF_MOD_POLY_PRESSURE    10
+#define SF_MOD_CHAN_PRESSURE     13
+#define SF_MOD_PITCH_WHEEL      14
+#define SF_MOD_PITCH_WHEEL_SENS 16
+
 /* layered generators record */
 typedef struct _SFGenLayer {
 	int nlists;
 	SFGenRec *list;
+	int nmods;
+	SFModRec *mods;
 } SFGenLayer;
 
 /* header record */

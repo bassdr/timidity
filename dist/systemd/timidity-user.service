@@ -16,7 +16,7 @@ After=pipewire.service
 BindsTo=pipewire.service
 
 [Service]
-ExecStart=/usr/bin/timidity -ip -OW -B2,8 -EFreverb=0
+ExecStart=/usr/bin/timidity -ip --realtime-priority=50 -OW
 Restart=on-failure
 RestartSec=2
 

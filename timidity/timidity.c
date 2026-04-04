@@ -304,8 +304,10 @@ static const struct option longopts[] = {
 	{ "no-autolink",            no_argument,       NULL, TIM_OPT_AUTOLINK },
 	{ "autolink",               optional_argument, NULL, TIM_OPT_AUTOLINK },
 #endif
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 	{ "realtime-priority",      required_argument, NULL, TIM_OPT_RT_PRIO },
+#endif
+#ifdef IA_ALSASEQ
 	{ "sequencer-ports",        required_argument, NULL, TIM_OPT_SEQ_PORTS },
 #endif
 #if defined(IA_WINSYN) || defined(IA_PORTMIDISYN) || defined(IA_NPSYN) || defined(IA_W32G_SYN) || defined(IA_W32GUI)
@@ -473,8 +475,10 @@ static inline int parse_opt_background(const char *);
 #ifdef IA_PIPEWIRESYN
 static inline int parse_opt_autolink(const char *);
 #endif
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 static inline int parse_opt_rt_prio(const char *);
+#endif
+#ifdef IA_ALSASEQ
 static inline int parse_opt_seq_ports(const char *);
 #endif
 #if defined(IA_WINSYN) || defined(IA_PORTMIDISYN) || defined(IA_NPSYN) || defined(IA_W32G_SYN) || defined(IA_W32GUI)
@@ -2846,9 +2850,11 @@ MAIN_INTERFACE int set_tim_opt_long(int c, char *optarg, int index)
 	case TIM_OPT_AUTOLINK:
 		return parse_opt_autolink(arg);
 #endif
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 	case TIM_OPT_RT_PRIO:
 		return parse_opt_rt_prio(arg);
+#endif
+#ifdef IA_ALSASEQ
 	case TIM_OPT_SEQ_PORTS:
 		return parse_opt_seq_ports(arg);
 #endif
@@ -3985,9 +3991,11 @@ static int parse_opt_h(const char *arg)
 "               Display this help message",
 "  -i mode    --interface=mode",
 "               Select user interface (see below for list)",
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
+"             --realtime-priority=n (for alsaseq/pipewiresyn)",
+"               Set the realtime priority (0-100, enables SCHED_FIFO + mlockall)",
+#endif
 #ifdef IA_ALSASEQ
-"             --realtime-priority=n (for alsaseq only)",
-"               Set the realtime priority (0-100)",
 "             --sequencer-ports=n (for alsaseq only)",
 "               Set the number of opened sequencer ports (default is 4)",
 #endif
@@ -4537,7 +4545,7 @@ static inline int parse_opt_autolink(const char *arg)
 }
 #endif
 
-#ifdef IA_ALSASEQ
+#if defined(IA_ALSASEQ) || defined(IA_PIPEWIRESYN)
 static inline int parse_opt_rt_prio(const char *arg)
 {
 	/* --realtime-priority */
@@ -4546,7 +4554,9 @@ static inline int parse_opt_rt_prio(const char *arg)
 		return 1;
 	return 0;
 }
+#endif
 
+#ifdef IA_ALSASEQ
 static inline int parse_opt_seq_ports(const char *arg)
 {
 	/* --sequencer-ports */

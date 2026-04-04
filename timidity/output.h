@@ -112,6 +112,15 @@ enum {
 
     PM_REQ_DIVISIONS,	  /* ARG: int32* - pointer to divisions number
 			  */
+
+    PM_REQ_OUTPUT_READY,  /* ARG: not-used
+			  * Block until the output device has consumed
+			  * enough data that it needs more.  For callback-
+			  * based backends (PipeWire, JACK), this waits on
+			  * the audio callback condvar.  Returns 0 on
+			  * success, -1 if not supported (caller should
+			  * fall back to usleep).
+			  */
 };
 
 

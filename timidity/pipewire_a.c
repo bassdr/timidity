@@ -213,6 +213,17 @@ struct pw_ctx {
 
 	struct ringbuf rb;
 	long samples_played;	/* frames consumed by PipeWire */
+
+	/*
+	 * Underrun recovery: store the last successfully read audio chunk.
+	 * On underrun, replay it with a fade-out instead of outputting
+	 * silence.  A faded repeat of ~5ms audio is perceptually invisible;
+	 * a silence gap produces an audible click.
+	 */
+	char *last_chunk;	/* last_chunk_size bytes, allocated at open */
+	int last_chunk_size;	/* bytes (frag_size * sample_size) */
+	int last_chunk_valid;	/* 1 if last_chunk contains real audio */
+	int underrun_faded;	/* 1 if we already faded on this underrun */
 };
 
 static struct pw_ctx ctx;
@@ -265,11 +276,52 @@ static void on_process(void *userdata)
 		ringbuf_read(&c->rb, dst, n_bytes);
 		c->samples_played += n_frames;
 		c->idle_frames = 0;
+		c->underrun_faded = 0;
+		/* save for underrun recovery */
+		if (c->last_chunk && n_bytes <= c->last_chunk_size) {
+			memcpy(c->last_chunk, dst, n_bytes);
+			c->last_chunk_valid = 1;
+		}
 	} else if (avail > 0) {
 		/* partial: read what we have, zero the rest */
 		int got = ringbuf_read(&c->rb, dst, avail);
 		memset(dst + got, 0, n_bytes - got);
 		c->samples_played += avail / stride;
+		c->idle_frames = 0;
+		c->underrun_faded = 0;
+	} else if (c->last_chunk_valid && !c->underrun_faded) {
+		/*
+		 * Underrun: replay last chunk with a linear fade-out.
+		 * This masks the gap perceptually — a faded repeat of
+		 * the previous quantum sounds like natural decay rather
+		 * than a harsh click from silence insertion.
+		 */
+		int copy = (n_bytes <= c->last_chunk_size)
+			   ? n_bytes : c->last_chunk_size;
+		int bps = stride / c->channels;  /* bytes per sample */
+		int i;
+
+		memcpy(dst, c->last_chunk, copy);
+		if (copy < n_bytes)
+			memset(dst + copy, 0, n_bytes - copy);
+
+		/* apply linear fade-out across the chunk */
+		for (i = 0; i < n_frames; i++) {
+			float gain = 1.0f - (float)i / n_frames;
+			int ch;
+			for (ch = 0; ch < c->channels; ch++) {
+				int off = (i * c->channels + ch) * bps;
+				if (bps == 2) {
+					int16_t *s = (int16_t *)(dst + off);
+					*s = (int16_t)(*s * gain);
+				} else if (bps == 4) {
+					int32_t *s = (int32_t *)(dst + off);
+					*s = (int32_t)(*s * gain);
+				}
+				/* U8: rare, skip fade for simplicity */
+			}
+		}
+		c->underrun_faded = 1;
 		c->idle_frames = 0;
 	} else {
 		memset(dst, 0, n_bytes);
@@ -407,61 +459,75 @@ static int open_output(void)
 	}
 
 	/*
-	 * Buffer sizing.  PipeWire is a pull-model backend like JACK, so
-	 * the global audio_buffer_size default (2048 on Linux) is far too
-	 * large for responsive real-time MIDI — it alone adds ~47 ms of
-	 * latency at 44.1 kHz.
+	 * Buffer sizing for interactive (real-time MIDI) mode.
 	 *
-	 * When the user hasn't tuned -B, use a PipeWire-specific default
-	 * of 256 frames / 2 fragments (~5.8 ms at 44.1 kHz).  If the user
-	 * explicitly set the buffer bits via -B n,m we honour that.
+	 * Latency is controlled entirely by PipeWire's graph quantum,
+	 * configured in pipewire.conf (default.clock.quantum).  The -B
+	 * flag is ignored — it was a workaround for the old push-model
+	 * architecture where the synthesis loop and audio output ran
+	 * on independent timers.  With demand-driven synthesis the
+	 * main loop paces itself to PipeWire's pull callbacks via
+	 * PM_REQ_OUTPUT_READY, so a user-tunable buffer knob adds
+	 * nothing except confusion.
 	 *
-	 * For interactive interfaces (-iA, -ip, etc.) we also shrink the
-	 * global audio_buffer_size so the synthesis engine computes in
-	 * matching small batches — otherwise the engine's 2048-frame
-	 * default adds ~47 ms on top of the PipeWire buffer latency.
+	 * Fragment size (frag_size) sets the PipeWire latency hint
+	 * and the synthesis batch size.  256 frames (~5.3 ms at 48 kHz)
+	 * is a good default — small enough for responsive MIDI, large
+	 * enough that synthesis overhead stays low.
+	 *
+	 * The ring buffer is sized to 3× frag_size: one quantum being
+	 * read by the RT callback, one being written by synthesis, and
+	 * one spare for scheduling jitter.  With SCHED_FIFO + mlockall
+	 * this is generous; without RT scheduling, the underrun
+	 * recovery (last-chunk fade) masks occasional glitches.
+	 *
+	 * For non-interactive use (file playback to PipeWire), -B
+	 * still works as before.
 	 */
-	/*
-	 * Ignore extra_param[1] from aq_calc_fragsize() — it is in
-	 * bytes, not frames, and would set a wildly oversized fragment.
-	 * Only honour the user's explicit -B n,m setting.
-	 */
-	if (audio_buffer_bits != DEFAULT_AUDIO_BUFFER_BITS)
-		ctx.frag_size = audio_buffer_size; /* user set -B n,m */
-	else
-		ctx.frag_size = 256;               /* PipeWire default */
-	if (dpm.extra_param[0] == 0)
-		ctx.frags = 2;
-	else
-		ctx.frags = dpm.extra_param[0];
+	if (strchr("ApmNP", ctl->id_character)) {
+		/* interactive mode: ignore -B, auto-compute everything */
+		int bits, s;
 
-	/* In interactive mode, shrink the synthesis batch size to match
-	 * the PipeWire fragment size, unless the user set -B explicitly. */
-	if (audio_buffer_bits == DEFAULT_AUDIO_BUFFER_BITS &&
-	    strchr("ApmNP", ctl->id_character)) {
-		int bits = 0, s = ctx.frag_size;
+		if (audio_buffer_bits != DEFAULT_AUDIO_BUFFER_BITS ||
+		    dpm.extra_param[0] != 0)
+			ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
+				  "PipeWire: -B ignored in interactive mode; "
+				  "set latency via PipeWire quantum "
+				  "(default.clock.quantum in pipewire.conf)");
+
+		ctx.frag_size = 256;
+		ctx.frags = 3;
+
+		/* shrink synthesis batch to match fragment size */
+		s = ctx.frag_size;
+		bits = 0;
 		while (s > 1) { s >>= 1; bits++; }
 		if (bits > AUDIO_BUFFER_BITS)
 			bits = AUDIO_BUFFER_BITS;
-		audio_buffer_bits = bits;	/* e.g. 256 -> 8 */
+		audio_buffer_bits = bits;	/* 256 -> 8 */
+	} else {
+		/* non-interactive (file playback): honour -B as before */
+		if (audio_buffer_bits != DEFAULT_AUDIO_BUFFER_BITS)
+			ctx.frag_size = audio_buffer_size;
+		else
+			ctx.frag_size = 256;
+		if (dpm.extra_param[0] == 0)
+			ctx.frags = 2;
+		else
+			ctx.frags = dpm.extra_param[0];
 	}
 
-	/*
-	 * The ring buffer must be large enough for PipeWire's quantum.
-	 * PipeWire's default quantum is 1024 frames; the minimum safe
-	 * ring buffer is 2× that.  Silently clamp to a sane minimum
-	 * without overriding the user's fragment geometry.
-	 */
 	{
 		int rb_frames = ctx.frag_size * ctx.frags;
-		int min_frames = 4096;		/* safe for quantums up to 2048 */
-
-		if (rb_frames < min_frames)
-			rb_frames = min_frames;
 
 		pthread_mutex_init(&ctx.lock, NULL);
 		pthread_cond_init(&ctx.cond, NULL);
 		ringbuf_init(&ctx.rb, rb_frames * ctx.sample_size);
+
+		ctx.last_chunk_size = ctx.frag_size * ctx.sample_size;
+		ctx.last_chunk = (char *)safe_malloc(ctx.last_chunk_size);
+		ctx.last_chunk_valid = 0;
+		ctx.underrun_faded = 0;
 	}
 
 	/* create threaded loop */
@@ -581,6 +647,9 @@ static void close_output(void)
 	ctx.loop = NULL;
 
 	ringbuf_destroy(&ctx.rb);
+	free(ctx.last_chunk);
+	ctx.last_chunk = NULL;
+	ctx.last_chunk_valid = 0;
 	pthread_mutex_destroy(&ctx.lock);
 	pthread_cond_destroy(&ctx.cond);
 
@@ -677,6 +746,36 @@ static int acntl(int request, void *arg)
 
 	case PM_REQ_PLAY_END:
 		return 0;
+
+	case PM_REQ_OUTPUT_READY:
+		/*
+		 * Block until the ring buffer has room for at least one
+		 * fragment.  This lets the synthesis loop pace itself to
+		 * the audio callback without busy-waiting or fixed sleeps.
+		 */
+		{
+			int frag_bytes = ctx.frag_size * ctx.sample_size;
+			struct timespec ts;
+
+			pthread_mutex_lock(&ctx.lock);
+			while (__atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE) &&
+			       ringbuf_empty(&ctx.rb) < frag_bytes) {
+				/*
+				 * Use timedwait with a 50ms ceiling so we
+				 * don't hang forever if the audio callback
+				 * stops firing (e.g. PipeWire disconnect).
+				 */
+				clock_gettime(CLOCK_REALTIME, &ts);
+				ts.tv_nsec += 50000000;  /* 50ms */
+				if (ts.tv_nsec >= 1000000000) {
+					ts.tv_nsec -= 1000000000;
+					ts.tv_sec++;
+				}
+				pthread_cond_timedwait(&ctx.cond, &ctx.lock, &ts);
+			}
+			pthread_mutex_unlock(&ctx.lock);
+			return 0;
+		}
 	}
 	return -1;
 }

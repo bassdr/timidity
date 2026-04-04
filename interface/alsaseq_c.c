@@ -200,7 +200,6 @@ ControlMode ctl=
 };
 
 /* options */
-int opt_realtime_priority = 0;
 int opt_sequencer_ports = 4;
 
 static int buffer_time_advance;

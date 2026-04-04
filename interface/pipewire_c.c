@@ -39,6 +39,8 @@
 #include <signal.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <sched.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
@@ -953,9 +955,22 @@ static void doit(void)
 				usleep(us > 50000 ? 50000 : us);
 			}
 		} else if (pwctx.active) {
-			int us = pwctx.buffer_time_advance * 500000
-				 / play_mode->rate;
-			usleep(us > 500 ? 500 : (us > 0 ? us : 100));
+			/*
+			 * Demand-driven pacing: wait until the audio
+			 * output has consumed enough that it needs more
+			 * data.  This replaces the old fixed usleep and
+			 * gives optimal latency — we synthesize exactly
+			 * when the ring buffer has room, not on a timer.
+			 *
+			 * Falls back to a brief usleep if the output
+			 * doesn't support PM_REQ_OUTPUT_READY (e.g.
+			 * file outputs accessed via -ip -Of).
+			 */
+			if (play_mode->acntl(PM_REQ_OUTPUT_READY, NULL) < 0) {
+				int us = pwctx.buffer_time_advance * 500000
+					 / play_mode->rate;
+				usleep(us > 500 ? 500 : (us > 0 ? us : 100));
+			}
 		} else {
 			usleep(10000);
 		}
@@ -978,6 +993,38 @@ static RETSIGTYPE sig_reset(int sig)
 }
 
 
+/*
+ * Set the process to realtime priority and lock memory.
+ * mlockall prevents page faults during synthesis (latency spikes).
+ * SCHED_FIFO ensures the synthesis thread isn't preempted by normal tasks.
+ */
+static void set_realtime_priority(void)
+{
+	struct sched_param schp;
+	int max_prio;
+
+	if (mlockall(MCL_CURRENT | MCL_FUTURE) == 0)
+		printf("mlockall: memory locked\n");
+	else
+		perror("mlockall (non-fatal, run as root or set memlock ulimit)");
+
+	if (opt_realtime_priority <= 0)
+		return;
+
+	memset(&schp, 0, sizeof(schp));
+	max_prio = sched_get_priority_max(SCHED_FIFO);
+	if (max_prio < opt_realtime_priority)
+		opt_realtime_priority = max_prio;
+
+	schp.sched_priority = opt_realtime_priority;
+	if (sched_setscheduler(0, SCHED_FIFO, &schp) != 0) {
+		perror("sched_setscheduler (non-fatal)");
+		return;
+	}
+
+	printf("set SCHED_FIFO(%d)\n", opt_realtime_priority);
+}
+
 static int ctl_pass_playing_list(int n, char *args[])
 {
 	int i, j;
@@ -987,6 +1034,8 @@ static int ctl_pass_playing_list(int n, char *args[])
 #endif
 
 	printf("TiMidity starting in PipeWire MIDI server mode\n");
+
+	set_realtime_priority();
 
 	memset(&pwctx, 0, sizeof(pwctx));
 

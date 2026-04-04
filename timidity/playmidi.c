@@ -116,6 +116,7 @@ int8 opt_init_keysig = 8;
 int8 opt_force_keysig = 8;
 int32 current_play_tempo = 500000;
 int opt_realtime_playing = 0;
+int opt_realtime_priority = 0;
 int reduce_voice_threshold = -1;
 static MBlockList playmidi_pool;
 int check_eot_flag;

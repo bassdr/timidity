@@ -15,11 +15,15 @@
 #   -OO          : libao (routes through PipeWire/PulseAudio, requires USE=ao)
 #
 # Common options:
-#   -B<n>,<m>    : buffer fragments(n) and size 2^m (e.g. -B2,8)
-#   -EFreverb=0  : disable reverb (saves CPU)
-#   -EFreverb=1  : enable reverb
+#   --realtime-priority=N : set SCHED_FIFO priority and lock memory (0-100)
+#   -EFreverb=0           : disable reverb (saves CPU)
+#   -EFreverb=1           : enable reverb
+#
+# Note: -B is ignored in interactive mode (-ip, -iA with PipeWire output).
+# Latency is controlled by PipeWire's quantum setting instead — see
+# dist/pipewire/10-timidity-low-latency.conf and dist/README.md.
 
-#TIMIDITY_OPTS="-EFreverb=0"
+#TIMIDITY_OPTS="--realtime-priority=50"
 
 # PipeWire system socket location (default: /run/pipewire).
 # Change this only if your system-wide PipeWire uses a non-standard path.

@@ -119,3 +119,19 @@ Remaining low-priority items (diminishing returns):
 
 4. **SF3 (Ogg Vorbis compressed SoundFonts)** — Not supported. Would allow using compressed SoundFont files. No audio quality impact.
 5. **Polyphony management** — Voice stealing could be smarter with release-phase awareness. Only matters when exceeding the voice limit (default 256).
+
+### Real-time latency reduction
+
+Goal: minimize the time between pressing a MIDI key and hearing the sound. The current architecture uses a push model (synthesis loop → ring buffer → audio callback), which adds inherent buffering latency. With default settings, total latency is ~190ms; with `-B1,4` it drops to ~22ms but causes underruns.
+
+Implementation order:
+
+1. **mlockall + RT scheduling** (quick win, no synthesis changes) — Call `mlockall(MCL_CURRENT | MCL_FUTURE)` at startup to prevent page faults. Set the synthesis thread to `SCHED_FIFO` priority ~50. Eliminates random latency spikes from the OS.
+
+2. **Graceful underrun handling** (quick win) — On buffer underrun, repeat the last audio chunk (or fade it) instead of outputting silence. A repeated ~5ms of audio is inaudible; a silence gap is a harsh click. Remove the auto-cork on idle (corking adds re-start latency).
+
+3. **Pull-model synthesis for PipeWire** (big architectural change, biggest win) — Synthesize directly inside the PipeWire `on_process()` callback instead of reading from a ring buffer. When PipeWire requests N frames, drain pending MIDI events from the lock-free `midibuf`, then call synthesis for exactly N frames. This eliminates the ring buffer, the audio queue intermediate step, and the main loop timing entirely. This is what FluidSynth does. The ring buffer path remains for non-callback backends (ALSA direct, file output).
+
+4. **PipeWire quantum tuning** (system config, zero code changes) — Ship a recommended PipeWire config fragment (`dist/pipewire/`) setting quantum to 128–256 frames. Packagers install it to `/etc/pipewire/pipewire.conf.d/`. Drops PipeWire's scheduling contribution from ~21ms to ~2.7–5.3ms.
+
+5. **Kernel PREEMPT_RT** (system config) — Recommend `CONFIG_PREEMPT_RT=y` for the host kernel. Available in mainline since Linux 6.12. Reduces worst-case scheduling latency from ~10ms to ~0.1ms. Document in `dist/README.md`.

@@ -109,10 +109,13 @@ Parallelizing voice mixing was considered but rejected. The per-voice pipeline (
 
 ### Synthesis improvements (vs FluidSynth)
 
-These are the remaining areas where FluidSynth produces better results, in priority order:
+Completed improvements that close the major audible gaps with FluidSynth:
 
-1. **SF2 modulator support** — Basic SF2 modulator support is implemented: PMOD/IMOD chunks are parsed in `sffile.c`, and `sndfont.c` resolves modulators through the full SF2 layer hierarchy (defaults → instrument global → instrument zone → preset additions) into existing Sample fields (`vel_to_fc`, `key_to_fc`, `vel_to_resonance`, `envelope_velf[]`, `modenv_velf[]`). Remaining gaps: non-linear modulator curves (concave/convex/switch), modulators with secondary sources (amount modulation), and runtime CC-based modulators that need per-voice evaluation rather than load-time resolution.
+1. **SF2 modulator support** — PMOD/IMOD chunks are parsed in `sffile.c`, and `sndfont.c` resolves modulators through the full SF2 layer hierarchy (defaults → instrument global → instrument zone → preset additions) into existing Sample fields (`vel_to_fc`, `key_to_fc`, `vel_to_resonance`, `envelope_velf[]`, `modenv_velf[]`). For FluidR3_GM.sf2 specifically, all default modulators resolve correctly; the 738 custom instrument modulators are no-ops (amount=0 with secondary sources). Only 4 instruments have concave-curve modulators that aren't yet handled — negligible impact.
 2. **Filter envelope modulation** — The modulation envelope (`env1ToFilterFc`, `modenv_to_pitch`, LFO modulations) is now enabled by default via `--enable-mod-envelope` at configure time (sets `MODULATION_ENVELOPE_ALLOW`). The runtime code in `playmidi.c` and `mix.c` was already complete; it was just disabled by default. Can still be toggled at runtime with `-Ee`/`-EE` or `--[no-]mod-envelope`. FluidR3_GM.sf2 has 51 instruments using `env1ToFilterFc`, with values up to ±12000 cents — these now get proper dynamic filter sweeps instead of static baked-in cutoff adjustments.
 3. **Reverb/chorus quality** — Freeverb improved with: character-dependent damping (rooms absorb more HF than halls), modulated comb filters (slow per-comb LFO breaks up metallic ringing), DC blocking filter after the comb/allpass chain, and doubled stereo spread (rate-scaled). Chorus improved with: sine LFO (smoother than triangle), dual taps per channel at 120-degree phase offsets for richer ensemble effect. The standard (non-Freeverb) reverb is unchanged.
-4. **SF3 (Ogg Vorbis compressed SoundFonts)** — Not supported. Would allow using compressed SoundFont files.
-5. **Polyphony management** — Voice stealing could be smarter with release-phase awareness.
+
+Remaining low-priority items (diminishing returns):
+
+4. **SF3 (Ogg Vorbis compressed SoundFonts)** — Not supported. Would allow using compressed SoundFont files. No audio quality impact.
+5. **Polyphony management** — Voice stealing could be smarter with release-phase awareness. Only matters when exceeding the voice limit (default 256).

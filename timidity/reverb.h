@@ -384,6 +384,9 @@ typedef struct {
 	comb combL[numcombs], combR[numcombs];
 	allpass allpassL[numallpasses], allpassR[numallpasses];
 	int32 wet1i, wet2i;
+	int32 dcl_in, dcl_out, dcr_in, dcr_out;  /* DC blocking filter state */
+	uint32 mod_phase[numcombs];  /* per-comb modulation phase accumulators */
+	int32 mod_depth;  /* modulation depth in fixed-point (samples << 8) */
 	int8 alloc_flag;
 } InfoFreeverb;
 
@@ -399,7 +402,9 @@ typedef struct {
 typedef struct {
 	simple_delay delayL, delayR;
 	lfo lfoL, lfoR;
+	lfo lfoL2, lfoR2;  /* second tap LFOs (120 degree offset) */
 	int32 wpt0, spt0, spt1, hist0, hist1;
+	int32 spt2, spt3, hist2, hist3;  /* second tap state */
 	int32 rpt0, depth, pdelay;
 	double level, feedback, send_reverb, send_delay;
 	int32 leveli, feedbacki, send_reverbi, send_delayi;

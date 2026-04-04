@@ -1030,6 +1030,21 @@ static double gs_revchar_to_rt(int character)
 	return rt;
 }
 
+static double gs_revchar_to_damp(int character)
+{
+	double d;
+	switch(character) {
+	case 0: d = 0.65;	break;	/* Room 1 - small room, more HF absorption */
+	case 1: d = 0.60;	break;	/* Room 2 */
+	case 2: d = 0.55;	break;	/* Room 3 */
+	case 3: d = 0.40;	break;	/* Hall 1 - large hall, brighter tail */
+	case 4: d = 0.35;	break;	/* Hall 2 */
+	case 5: d = 0.50;	break;	/* Plate */
+	default: d = 0.50;	break;
+	}
+	return d;
+}
+
 static void init_standard_reverb(InfoStandardReverb *info)
 {
 	double time;
@@ -1368,7 +1383,7 @@ FLOAT_T freeverb_offsetroom = 0.7;
 #define initialdry 0
 #define initialwidth 0.5
 #define initialallpassfbk 0.65
-#define stereospread 23
+#define stereospread_base 46
 static int combtunings[numcombs] = {1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617};
 static int allpasstunings[numallpasses] = {225, 341, 441, 556};
 #define fixedgain 0.025
@@ -1379,6 +1394,7 @@ static void realloc_freeverb_buf(InfoFreeverb *rev)
 	int i;
 	int32 tmpL, tmpR;
 	double time, samplerate = play_mode->rate;
+	int32 spread = stereospread_base * samplerate / 44100;
 
 	time = reverb_time_table[reverb_status_gs.time] * gs_revchar_to_rt(reverb_status_gs.character) * combfbk
 		/ (60 * combtunings[numcombs - 1] / (-20 * log10(rev->roomsize1) * 44100.0));
@@ -1386,7 +1402,7 @@ static void realloc_freeverb_buf(InfoFreeverb *rev)
 	for(i = 0; i < numcombs; i++)
 	{
 		tmpL = combtunings[i] * samplerate * time / 44100.0;
-		tmpR = (combtunings[i] + stereospread) * samplerate * time / 44100.0;
+		tmpR = (combtunings[i] + spread) * samplerate * time / 44100.0;
 		if(tmpL < 10) tmpL = 10;
 		if(tmpR < 10) tmpR = 10;
 		while(!isprime(tmpL)) tmpL++;
@@ -1400,7 +1416,7 @@ static void realloc_freeverb_buf(InfoFreeverb *rev)
 	for(i = 0; i < numallpasses; i++)
 	{
 		tmpL = allpasstunings[i] * samplerate * time / 44100.0;
-		tmpR = (allpasstunings[i] + stereospread) * samplerate * time / 44100.0;
+		tmpR = (allpasstunings[i] + spread) * samplerate * time / 44100.0;
 		if(tmpL < 10) tmpL = 10;
 		if(tmpR < 10) tmpR = 10;
 		while(!isprime(tmpL)) tmpL++;
@@ -1424,7 +1440,7 @@ static void update_freeverb(InfoFreeverb *rev)
 	rev->wet1 = rev->width / 2.0 + 0.5;
 	rev->wet2 = (1.0 - rev->width) / 2.0;
 	rev->roomsize1 = rev->roomsize;
-	rev->damp1 = rev->damp;
+	rev->damp1 = gs_revchar_to_damp(reverb_status_gs.character);
 
 	realloc_freeverb_buf(rev);
 
@@ -1472,19 +1488,30 @@ static void init_freeverb(InfoFreeverb *rev)
 		init_freeverb_allpass(&rev->allpassL[i]);
 		init_freeverb_allpass(&rev->allpassR[i]);
 	}
+	/* Initialize comb modulation - different starting phases per comb
+	 * to avoid correlated modulation artifacts */
+	for(i = 0; i < numcombs; i++) {
+		rev->mod_phase[i] = (uint32)(i * (0xFFFFFFFF / numcombs));
+	}
+	/* Modulation depth: ~1.5 samples in 8.24 fixed-point.
+	 * Enough to break up metallic ringing without audible pitch wobble. */
+	rev->mod_depth = (int32)(1.5 * 256);
+	/* Clear DC blocking filter state */
+	rev->dcl_in = rev->dcl_out = rev->dcr_in = rev->dcr_out = 0;
 }
 
 static void alloc_freeverb_buf(InfoFreeverb *rev)
 {
 	int i;
+	int32 spread = stereospread_base * play_mode->rate / 44100;
 	if(rev->alloc_flag) {return;}
 	for (i = 0; i < numcombs; i++) {
 		set_freeverb_comb(&rev->combL[i], combtunings[i]);
-		set_freeverb_comb(&rev->combR[i], combtunings[i] + stereospread);
+		set_freeverb_comb(&rev->combR[i], combtunings[i] + spread);
 	}
 	for (i = 0; i < numallpasses; i++) {
 		set_freeverb_allpass(&rev->allpassL[i], allpasstunings[i]);
-		set_freeverb_allpass(&rev->allpassR[i], allpasstunings[i] + stereospread);
+		set_freeverb_allpass(&rev->allpassR[i], allpasstunings[i] + spread);
 		rev->allpassL[i].feedback = initialallpassfbk;
 		rev->allpassR[i].feedback = initialallpassfbk;
 	}
@@ -1547,13 +1574,60 @@ static inline void do_freeverb_comb(int32 input, int32 *stream, int32 *buf, int3
 	*stream += output;
 }
 
+/* Modulated comb filter: reads from a position offset by a slow LFO.
+ * The modulation breaks up metallic ringing from static comb frequencies.
+ * mod_phase is a 32-bit phase accumulator, mod_depth is in 8.8 fixed-point (samples << 8). */
+static inline void do_freeverb_comb_mod(int32 input, int32 *stream, int32 *buf, int32 size, int32 *index,
+					int32 damp1, int32 damp2, int32 *fs, int32 feedback,
+					uint32 *mod_phase, int32 mod_depth)
+{
+	int32 output, readpos, frac, s0, s1;
+	int32 mod_offset;
+
+	/* Slow sinusoidal modulation from phase accumulator.
+	 * Approximate sin with triangle: cheap, smooth enough for this. */
+	{
+		int32 phase = (int32)(*mod_phase >> 1);  /* signed 31-bit */
+		/* Triangle wave: ramp up in first half, down in second */
+		if (phase < 0) phase = -phase;
+		/* phase is now [0, 0x3FFFFFFF], scale to [-mod_depth, +mod_depth] */
+		mod_offset = (int32)((int64)phase * mod_depth >> 29) - (mod_depth >> 1);
+	}
+
+	/* Read from modulated position with linear interpolation */
+	readpos = *index + (mod_offset >> 8);
+	frac = mod_offset & 0xFF;
+	if (readpos < 0) readpos += size;
+	else if (readpos >= size) readpos -= size;
+	s0 = buf[readpos];
+	s1 = buf[readpos + 1 < size ? readpos + 1 : 0];
+	output = s0 + (int32)(((int64)(s1 - s0) * frac) >> 8);
+
+	/* Standard damping and feedback, written at un-modulated index */
+	*fs = imuldiv24(output, damp2) + imuldiv24(*fs, damp1);
+	buf[*index] = input + imuldiv24(*fs, feedback);
+	if (++*index >= size) {*index = 0;}
+	*stream += output;
+}
+
+/* Per-comb modulation phase increments.  Different rates per comb
+ * (0.5-1.5 Hz range) prevent correlated ringing.  At 44100 Hz with
+ * a 32-bit phase accumulator, increment = freq * 2^32 / samplerate.
+ * These are pre-computed for 44100 Hz and scaled at init time. */
+static const double comb_mod_rates[numcombs] = {
+	0.50, 0.73, 0.97, 1.13, 0.63, 0.87, 1.07, 1.31
+};
+
 static void do_ch_freeverb(int32 *buf, int32 count, InfoFreeverb *rev)
 {
 	int32 i, k = 0;
-	int32 outl, outr, input;
+	int32 outl, outr, input, tmp;
 	comb *combL = rev->combL, *combR = rev->combR;
 	allpass *allpassL = rev->allpassL, *allpassR = rev->allpassR;
 	simple_delay *pdelay = &(rev->pdelay);
+	int32 mod_depth = rev->mod_depth;
+	/* DC blocking coefficient: 0.998 in 8.24 fixed-point */
+	int32 dc_coeff = TIM_FSCALE(0.998, 24);
 
 	if(count == MAGIC_INIT_EFFECT_INFO) {
 		alloc_freeverb_buf(rev);
@@ -1573,15 +1647,28 @@ static void do_ch_freeverb(int32 *buf, int32 count, InfoFreeverb *rev)
 		do_delay(&input, pdelay->buf, pdelay->size, &pdelay->index);
 
 		for (i = 0; i < numcombs; i++) {
-			do_freeverb_comb(input, &outl, combL[i].buf, combL[i].size, &combL[i].index,
-				combL[i].damp1i, combL[i].damp2i, &combL[i].filterstore, combL[i].feedbacki);
-			do_freeverb_comb(input, &outr, combR[i].buf, combR[i].size, &combR[i].index,
-				combR[i].damp1i, combR[i].damp2i, &combR[i].filterstore, combR[i].feedbacki);
+			/* Phase increment scaled to sample rate (pairs share phase) */
+			uint32 phase_inc = (uint32)(comb_mod_rates[i] * 4294967296.0 / play_mode->rate);
+			rev->mod_phase[i] += phase_inc;
+
+			do_freeverb_comb_mod(input, &outl, combL[i].buf, combL[i].size, &combL[i].index,
+				combL[i].damp1i, combL[i].damp2i, &combL[i].filterstore, combL[i].feedbacki,
+				&rev->mod_phase[i], mod_depth);
+			do_freeverb_comb_mod(input, &outr, combR[i].buf, combR[i].size, &combR[i].index,
+				combR[i].damp1i, combR[i].damp2i, &combR[i].filterstore, combR[i].feedbacki,
+				&rev->mod_phase[i], mod_depth);
 		}
 		for (i = 0; i < numallpasses; i++) {
 			do_freeverb_allpass(&outl, allpassL[i].buf, allpassL[i].size, &allpassL[i].index, allpassL[i].feedbacki);
 			do_freeverb_allpass(&outr, allpassR[i].buf, allpassR[i].size, &allpassR[i].index, allpassR[i].feedbacki);
 		}
+
+		/* DC blocking filter: y[n] = x[n] - x[n-1] + 0.998 * y[n-1] */
+		tmp = outl - rev->dcl_in + imuldiv24(rev->dcl_out, dc_coeff);
+		rev->dcl_in = outl; rev->dcl_out = tmp; outl = tmp;
+		tmp = outr - rev->dcr_in + imuldiv24(rev->dcr_out, dc_coeff);
+		rev->dcr_in = outr; rev->dcr_out = tmp; outr = tmp;
+
 		buf[k] += imuldiv24(outl, rev->wet1i) + imuldiv24(outr, rev->wet2i);
 		buf[k + 1] += imuldiv24(outr, rev->wet1i) + imuldiv24(outl, rev->wet2i);
 		++k;
@@ -2179,22 +2266,34 @@ static void do_ch_normal_delay(int32 *buf, int32 count, InfoDelay3 *info)
 /*                             */
 static int32 chorus_effect_buffer[AUDIO_BUFFER_SIZE * 2];
 
-/*! Stereo Chorus; this implementation is specialized for system effect. */
+/*! Stereo Chorus; this implementation is specialized for system effect.
+ * Uses sine LFO (smoother than triangle) with dual taps per channel
+ * for a richer ensemble effect. */
 static void do_ch_stereo_chorus(int32 *buf, int32 count, InfoStereoChorus *info)
 {
-	int32 i, output, f0, f1, v0, v1;
+	int32 i, output, f0, f1, f2, f3, v0, v1;
 	int32 *bufL = info->delayL.buf, *bufR = info->delayR.buf,
 		*lfobufL = info->lfoL.buf, *lfobufR = info->lfoR.buf,
+		*lfobufL2 = info->lfoL2.buf, *lfobufR2 = info->lfoR2.buf,
 		icycle = info->lfoL.icycle, cycle = info->lfoL.cycle,
+		icycle2 = info->lfoL2.icycle, cycle2 = info->lfoL2.cycle,
 		leveli = info->leveli, feedbacki = info->feedbacki,
 		send_reverbi = info->send_reverbi, send_delayi = info->send_delayi,
 		depth = info->depth, pdelay = info->pdelay, rpt0 = info->rpt0;
 	int32 wpt0 = info->wpt0, spt0 = info->spt0, spt1 = info->spt1,
-		hist0 = info->hist0, hist1 = info->hist1, lfocnt = info->lfoL.count;
+		spt2 = info->spt2, spt3 = info->spt3,
+		hist0 = info->hist0, hist1 = info->hist1,
+		hist2 = info->hist2, hist3 = info->hist3,
+		lfocnt = info->lfoL.count, lfocnt2 = info->lfoL2.count;
 
 	if(count == MAGIC_INIT_EFFECT_INFO) {
-		init_lfo(&(info->lfoL), (double)chorus_status_gs.rate * 0.122, LFO_TRIANGULAR, 0);
-		init_lfo(&(info->lfoR), (double)chorus_status_gs.rate * 0.122, LFO_TRIANGULAR, 90);
+		double rate = (double)chorus_status_gs.rate * 0.122;
+		/* Primary taps: sine LFO, L at 0 degrees, R at 90 degrees */
+		init_lfo(&(info->lfoL), rate, LFO_SINE, 0);
+		init_lfo(&(info->lfoR), rate, LFO_SINE, 90);
+		/* Secondary taps: same rate, offset by 120 and 210 degrees */
+		init_lfo(&(info->lfoL2), rate, LFO_SINE, 120);
+		init_lfo(&(info->lfoR2), rate, LFO_SINE, 210);
 		info->pdelay = chorus_delay_time_table[chorus_status_gs.delay] * (double)play_mode->rate / 1000.0;
 		info->depth = (double)(chorus_status_gs.depth + 1) / 3.2 * (double)play_mode->rate / 1000.0;
 		info->pdelay -= info->depth / 2;	/* NOMINAL_DELAY to delay */
@@ -2207,10 +2306,11 @@ static void do_ch_stereo_chorus(int32 *buf, int32 count, InfoStereoChorus *info)
 		info->send_reverb = (double)chorus_status_gs.send_reverb * 0.787 / 100.0 * REV_INP_LEV;
 		info->send_delay = (double)chorus_status_gs.send_delay * 0.787 / 100.0;
 		info->feedbacki = TIM_FSCALE(info->feedback, 24);
-		info->leveli = TIM_FSCALE(info->level, 24);
+		info->leveli = TIM_FSCALE(info->level * 0.7, 24);	/* scale per-tap for dual-tap sum */
 		info->send_reverbi = TIM_FSCALE(info->send_reverb, 24);
 		info->send_delayi = TIM_FSCALE(info->send_delay, 24);
 		info->wpt0 = info->spt0 = info->spt1 = info->hist0 = info->hist1 = 0;
+		info->spt2 = info->spt3 = info->hist2 = info->hist3 = 0;
 		return;
 	} else if(count == MAGIC_FREE_EFFECT_INFO) {
 		free_delay(&(info->delayL));
@@ -2218,56 +2318,79 @@ static void do_ch_stereo_chorus(int32 *buf, int32 count, InfoStereoChorus *info)
 		return;
 	}
 
-	/* LFO */
+	/* Primary LFO tap positions */
 	f0 = imuldiv24(lfobufL[imuldiv24(lfocnt, icycle)], depth);
-	spt0 = wpt0 - pdelay - (f0 >> 8);	/* integral part of delay */
-	f0 = 0xFF - (f0 & 0xFF);	/* (1 - frac) * 256 */
+	spt0 = wpt0 - pdelay - (f0 >> 8);
+	f0 = 0xFF - (f0 & 0xFF);
 	if(spt0 < 0) {spt0 += rpt0;}
 	f1 = imuldiv24(lfobufR[imuldiv24(lfocnt, icycle)], depth);
-	spt1 = wpt0 - pdelay - (f1 >> 8);	/* integral part of delay */
-	f1 = 0xFF - (f1 & 0xFF);	/* (1 - frac) * 256 */
+	spt1 = wpt0 - pdelay - (f1 >> 8);
+	f1 = 0xFF - (f1 & 0xFF);
 	if(spt1 < 0) {spt1 += rpt0;}
-	
+	/* Secondary LFO tap positions */
+	f2 = imuldiv24(lfobufL2[imuldiv24(lfocnt2, icycle2)], depth);
+	spt2 = wpt0 - pdelay - (f2 >> 8);
+	f2 = 0xFF - (f2 & 0xFF);
+	if(spt2 < 0) {spt2 += rpt0;}
+	f3 = imuldiv24(lfobufR2[imuldiv24(lfocnt2, icycle2)], depth);
+	spt3 = wpt0 - pdelay - (f3 >> 8);
+	f3 = 0xFF - (f3 & 0xFF);
+	if(spt3 < 0) {spt3 += rpt0;}
+
 	for(i = 0; i < count; i++) {
 		v0 = bufL[spt0];
 		v1 = bufR[spt1];
 
-		/* LFO */
+		/* Advance write pointer and LFOs */
 		if(++wpt0 == rpt0) {wpt0 = 0;}
+		/* Primary taps */
 		f0 = imuldiv24(lfobufL[imuldiv24(lfocnt, icycle)], depth);
-		spt0 = wpt0 - pdelay - (f0 >> 8);	/* integral part of delay */
-		f0 = 0xFF - (f0 & 0xFF);	/* (1 - frac) * 256 */
+		spt0 = wpt0 - pdelay - (f0 >> 8);
+		f0 = 0xFF - (f0 & 0xFF);
 		if(spt0 < 0) {spt0 += rpt0;}
 		f1 = imuldiv24(lfobufR[imuldiv24(lfocnt, icycle)], depth);
-		spt1 = wpt0 - pdelay - (f1 >> 8);	/* integral part of delay */
-		f1 = 0xFF - (f1 & 0xFF);	/* (1 - frac) * 256 */
+		spt1 = wpt0 - pdelay - (f1 >> 8);
+		f1 = 0xFF - (f1 & 0xFF);
 		if(spt1 < 0) {spt1 += rpt0;}
+		/* Secondary taps */
+		f2 = imuldiv24(lfobufL2[imuldiv24(lfocnt2, icycle2)], depth);
+		spt2 = wpt0 - pdelay - (f2 >> 8);
+		f2 = 0xFF - (f2 & 0xFF);
+		if(spt2 < 0) {spt2 += rpt0;}
+		f3 = imuldiv24(lfobufR2[imuldiv24(lfocnt2, icycle2)], depth);
+		spt3 = wpt0 - pdelay - (f3 >> 8);
+		f3 = 0xFF - (f3 & 0xFF);
+		if(spt3 < 0) {spt3 += rpt0;}
 		if(++lfocnt == cycle) {lfocnt = 0;}
+		if(++lfocnt2 == cycle2) {lfocnt2 = 0;}
 
-		/* left */
-		/* delay with all-pass interpolation */
+		/* left: primary tap + secondary tap */
 		output = hist0 = v0 + imuldiv8(bufL[spt0] - hist0, f0);
+		output += (hist2 = bufL[spt2 < rpt0 ? spt2 : 0]
+			+ imuldiv8(bufL[spt2 + 1 < rpt0 ? spt2 + 1 : 0] - hist2, f2));
 		bufL[wpt0] = chorus_effect_buffer[i] + imuldiv24(output, feedbacki);
 		output = imuldiv24(output, leveli);
 		buf[i] += output;
-		/* send to other system effects (it's peculiar to GS) */
 		reverb_effect_buffer[i] += imuldiv24(output, send_reverbi);
 		delay_effect_buffer[i] += imuldiv24(output, send_delayi);
 
-		/* right */
-		/* delay with all-pass interpolation */
+		/* right: primary tap + secondary tap */
 		output = hist1 = v1 + imuldiv8(bufR[spt1] - hist1, f1);
+		output += (hist3 = bufR[spt3 < rpt0 ? spt3 : 0]
+			+ imuldiv8(bufR[spt3 + 1 < rpt0 ? spt3 + 1 : 0] - hist3, f3));
 		bufR[wpt0] = chorus_effect_buffer[++i] + imuldiv24(output, feedbacki);
 		output = imuldiv24(output, leveli);
 		buf[i] += output;
-		/* send to other system effects (it's peculiar to GS) */
 		reverb_effect_buffer[i] += imuldiv24(output, send_reverbi);
 		delay_effect_buffer[i] += imuldiv24(output, send_delayi);
 	}
 	memset(chorus_effect_buffer, 0, sizeof(int32) * count);
 	info->wpt0 = wpt0, info->spt0 = spt0, info->spt1 = spt1,
-		info->hist0 = hist0, info->hist1 = hist1;
+		info->spt2 = spt2, info->spt3 = spt3,
+		info->hist0 = hist0, info->hist1 = hist1,
+		info->hist2 = hist2, info->hist3 = hist3;
 	info->lfoL.count = info->lfoR.count = lfocnt;
+	info->lfoL2.count = info->lfoR2.count = lfocnt2;
 }
 
 void init_ch_chorus(void)

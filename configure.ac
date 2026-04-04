@@ -1381,6 +1381,18 @@ else
   AC_MSG_RESULT(no)
 fi
 
+AC_ARG_ENABLE(mod-envelope,
+  AS_HELP_STRING([--enable-mod-envelope], [Enable modulation envelope by default (default: yes)]),
+  [enable_mod_envelope="$enableval"],
+  [enable_mod_envelope=yes])
+AC_MSG_CHECKING(whether to enable modulation envelope by default)
+if test "x$enable_mod_envelope" = xyes; then
+  AC_MSG_RESULT(yes)
+  AC_DEFINE(MODULATION_ENVELOPE_ALLOW,1,Define to enable modulation envelope by default.)
+else
+  AC_MSG_RESULT(no)
+fi
+
 dnl AO
 AC_MSG_CHECKING(enable_audio=ao)
 if test "x$au_enable_ao" = xyes; then

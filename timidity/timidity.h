@@ -363,8 +363,9 @@ typedef double FLOAT_T;
 /* Define if you want to use modulation envelope.
  * This mode needs high CPU power.
  * There is a command line option to enable/disable this mode.
+ * Set at configure time with --enable-mod-envelope (default: yes).
  */
-/* #define MODULATION_ENVELOPE_ALLOW */
+/* #define MODULATION_ENVELOPE_ALLOW */  /* set by configure --enable-mod-envelope */
 
 
 /* Define if you want to trace text meta event at playing.

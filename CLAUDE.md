@@ -117,21 +117,23 @@ Completed improvements that close the major audible gaps with FluidSynth:
 
 Remaining low-priority items (diminishing returns):
 
-4. **SF3 (Ogg Vorbis compressed SoundFonts)** — Not supported. Would allow using compressed SoundFont files. No audio quality impact.
+4. **SF3 (Ogg Vorbis compressed SoundFonts)** — Not supported. Would allow using compressed SoundFont files. No audio quality impact. Low priority: the recommended MuseScore_General SoundFont is available as SF2 (236 MB) and packaged in the `musescore-soundfont` ebuild.
 5. **Polyphony management** — Voice stealing could be smarter with release-phase awareness. Only matters when exceeding the voice limit (default 256).
 
 ### Real-time latency reduction
 
-Goal: minimize the time between pressing a MIDI key and hearing the sound. The current architecture uses a push model (synthesis loop → ring buffer → audio callback), which adds inherent buffering latency. With default settings, total latency is ~190ms; with `-B1,4` it drops to ~22ms but causes underruns.
+Completed improvements for low-latency MIDI-to-speaker response:
 
-Implementation order:
+1. **mlockall + RT scheduling** — `mlockall(MCL_CURRENT | MCL_FUTURE)` at startup prevents page faults. `SCHED_FIFO` via `--realtime-priority=N` (now works for both `-iA` and `-ip`). PipeWire's `@pipewire` group ulimits provide the needed `memlock` and `rtprio` capabilities.
 
-1. **mlockall + RT scheduling** (quick win, no synthesis changes) — Call `mlockall(MCL_CURRENT | MCL_FUTURE)` at startup to prevent page faults. Set the synthesis thread to `SCHED_FIFO` priority ~50. Eliminates random latency spikes from the OS.
+2. **Graceful underrun handling** — On buffer underrun, the PipeWire audio callback replays the last chunk with a linear fade-out instead of outputting silence. A faded repeat of ~5ms audio is perceptually invisible; a silence gap produces an audible click.
 
-2. **Graceful underrun handling** (quick win) — On buffer underrun, repeat the last audio chunk (or fade it) instead of outputting silence. A repeated ~5ms of audio is inaudible; a silence gap is a harsh click. Remove the auto-cork on idle (corking adds re-start latency).
+3. **Demand-driven synthesis** — The PipeWire synthesis loop (`doit()` in `pipewire_c.c`) uses `PM_REQ_OUTPUT_READY` to wait on a condvar signaled by the audio callback, replacing the old fixed `usleep`. This paces synthesis to exactly when the ring buffer needs data. The `-B` flag is ignored in interactive mode; the ring buffer is auto-sized to 3× the 256-frame fragment size. Latency is controlled entirely by PipeWire's graph quantum (`default.clock.quantum` in `pipewire.conf`).
 
-3. **Pull-model synthesis for PipeWire** (big architectural change, biggest win) — Synthesize directly inside the PipeWire `on_process()` callback instead of reading from a ring buffer. When PipeWire requests N frames, drain pending MIDI events from the lock-free `midibuf`, then call synthesis for exactly N frames. This eliminates the ring buffer, the audio queue intermediate step, and the main loop timing entirely. This is what FluidSynth does. The ring buffer path remains for non-callback backends (ALSA direct, file output).
+4. **PipeWire quantum config** — Ships `dist/pipewire/10-timidity-low-latency.conf` setting quantum to 128 frames (~2.7ms at 48kHz). Packagers install to `/usr/share/pipewire/pipewire.conf.avail/`; users activate via symlink to `/etc/pipewire/pipewire.conf.d/`.
 
-4. **PipeWire quantum tuning** (system config, zero code changes) — Ship a recommended PipeWire config fragment (`dist/pipewire/`) setting quantum to 128–256 frames. Packagers install it to `/etc/pipewire/pipewire.conf.d/`. Drops PipeWire's scheduling contribution from ~21ms to ~2.7–5.3ms.
+5. **Kernel PREEMPT_RT** — Documented in `dist/README.md`. `CONFIG_PREEMPT_RT=y` (mainline since Linux 6.12) reduces worst-case scheduling latency from ~10ms to ~0.1ms. Ebuild checks kernel config with `linux-info` eclass warnings.
 
-5. **Kernel PREEMPT_RT** (system config) — Recommend `CONFIG_PREEMPT_RT=y` for the host kernel. Available in mainline since Linux 6.12. Reduces worst-case scheduling latency from ~10ms to ~0.1ms. Document in `dist/README.md`.
+Remaining low-priority items:
+
+6. **True pull-model synthesis** — Currently synthesis still runs in the main thread and pushes through a small ring buffer to the PipeWire RT callback. The ideal architecture (like FluidSynth) synthesizes directly inside `on_process()`, eliminating the ring buffer entirely. This is blocked by `play_event()` potentially triggering instrument file I/O (disk reads), which cannot happen in an RT callback. Would require pre-loading all instruments or deferring loads to a separate thread.

@@ -1003,7 +1003,7 @@ static void set_realtime_priority(void)
 	struct sched_param schp;
 	int max_prio;
 
-	if (mlockall(MCL_CURRENT | MCL_FUTURE) == 0)
+	if (mlockall(MCL_CURRENT) == 0)
 		printf("mlockall: memory locked\n");
 	else
 		perror("mlockall (non-fatal, run as root or set memlock ulimit)");
@@ -1025,6 +1025,20 @@ static void set_realtime_priority(void)
 	printf("set SCHED_FIFO(%d)\n", opt_realtime_priority);
 }
 
+static void reset_realtime_priority(void)
+{
+	struct sched_param schp;
+
+	memset(&schp, 0, sizeof(schp));
+
+	sched_setscheduler(0, SCHED_OTHER, &schp);
+
+	if (munlockall() == 0)
+		printf("munlockall: memory unlocked\n");
+	else
+		perror("munlockall (non-fatal, run as root or set memlock ulimit)");
+}
+
 static int ctl_pass_playing_list(int n, char *args[])
 {
 	int i, j;
@@ -1034,8 +1048,6 @@ static int ctl_pass_playing_list(int n, char *args[])
 #endif
 
 	printf("TiMidity starting in PipeWire MIDI server mode\n");
-
-	set_realtime_priority();
 
 	memset(&pwctx, 0, sizeof(pwctx));
 
@@ -1086,6 +1098,7 @@ static int ctl_pass_playing_list(int n, char *args[])
 			}
 		}
 
+		set_realtime_priority();
 		printf("PipeWire MIDI synthesizer ready\n");
 
 		if (IS_STREAM_TRACE &&
@@ -1127,6 +1140,7 @@ static int ctl_pass_playing_list(int n, char *args[])
 		play_mode->close_output();
 
 		pw_teardown();
+		reset_realtime_priority();
 
 		if (quit_flag)
 			break;

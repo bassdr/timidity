@@ -75,6 +75,19 @@ void readmidi_read_init(void);
 #define MIDI_BUF_SIZE 1024
 #define MIDI_MSG_MAX  256
 
+#define MIDI_STATUS_MASK              0xF0
+#define MIDI_CHANNEL_MASK             0x0F
+#define MIDI_SYSTEM_EXCLUSIVE         0xF0
+
+#define MIDI_NOTE_OFF                 0x80
+#define MIDI_NOTE_ON                  0x90
+#define MIDI_POLY_PRESSURE            0xA0
+#define MIDI_CONTROL_CHANGE           0xB0
+#define MIDI_PROGRAM_CHANGE           0xC0
+#define MIDI_CHANNEL_PRESSURE         0xD0
+#define MIDI_PITCH_BEND               0xE0
+#define MIDI_SYSTEM_MESSAGE           0xF0
+
 struct midi_msg {
 	uint8_t data[MIDI_MSG_MAX];
 	uint32_t len;
@@ -764,45 +777,46 @@ static void process_midi_message(const uint8_t *data, uint32_t len)
 		return;
 
 	ev.type = ME_NONE;
-	ev.channel = data[0] & 0x0f;
+	ev.channel = data[0] & MIDI_CHANNEL_MASK;
 	ev.a = (len > 1) ? data[1] : 0;
 	ev.b = (len > 2) ? data[2] : 0;
 
-	switch (data[0] & 0xf0) {
-	case 0x80:
+	if (data[0] == MIDI_SYSTEM_EXCLUSIVE && len > 1) {
+		/* SysEx - cast away const; parse functions don't modify data */
+		if (parse_sysex_event((uint8 *)(data + 1), len - 1, &ev))
+			seq_play_event(&ev);
+		ne = parse_sysex_event_multi((uint8 *)(data + 1), len - 1, evm);
+		if (ne > 0)
+			for (i = 0; i < ne; i++)
+				seq_play_event(&evm[i]);
+		return; /* already handled */
+	}
+
+	switch (data[0] & MIDI_STATUS_MASK) {
+	case MIDI_NOTE_OFF:
 		ev.type = ME_NOTEOFF;
 		break;
-	case 0x90:
+	case MIDI_NOTE_ON:
 		ev.type = (ev.b) ? ME_NOTEON : ME_NOTEOFF;
 		break;
-	case 0xa0:
+	case MIDI_POLY_PRESSURE:
 		ev.type = ME_KEYPRESSURE;
 		break;
-	case 0xb0:
+	case MIDI_CONTROL_CHANGE:
 		if (!convert_midi_control_change(ev.channel, ev.a, ev.b, &ev))
 			ev.type = ME_NONE;
 		break;
-	case 0xc0:
+	case MIDI_PROGRAM_CHANGE:
 		ev.type = ME_PROGRAM;
 		break;
-	case 0xd0:
+	case MIDI_CHANNEL_PRESSURE:
 		ev.type = ME_CHANNEL_PRESSURE;
 		break;
-	case 0xe0:
+	case MIDI_PITCH_BEND:
 		ev.type = ME_PITCHWHEEL;
 		break;
-	case 0xf0:
-		if (data[0] == 0xf0 && len > 1) {
-			/* SysEx - cast away const; parse functions don't modify data */
-			if (parse_sysex_event((uint8 *)(data + 1), len - 1, &ev))
-				seq_play_event(&ev);
-			ne = parse_sysex_event_multi((uint8 *)(data + 1), len - 1, evm);
-			if (ne > 0)
-				for (i = 0; i < ne; i++)
-					seq_play_event(&evm[i]);
-			return; /* already handled */
-		}
-		return; /* ignore other system messages */
+	case MIDI_SYSTEM_MESSAGE:
+		return; /* ignore system messages other than MIDI_SYSTEM_EXCLUSIVE */
 	default:
 		return;
 	}

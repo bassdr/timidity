@@ -1055,6 +1055,14 @@ static void preload_instruments(void)
 	/* Any additional banks/drumsets referenced in timidity.cfg */
 	load_missing_instruments(NULL);
 
+	/* Pre-allocate the reverb mixing buffer so it doesn't get
+	 * lazily allocated during the RT synthesis loop. */
+	init_reverb_buffer();
+
+	/* Pre-grow the drum parts memory pool so that new_segment()
+	 * doesn't call malloc during the RT synthesis loop. */
+	pregrow_playmidi_pool();
+
 	printf("Preloaded %d instruments\n", n);
 }
 

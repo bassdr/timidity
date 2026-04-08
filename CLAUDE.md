@@ -138,4 +138,16 @@ Completed improvements for low-latency MIDI-to-speaker response:
 
 Remaining low-priority items:
 
-7. **True pull-model synthesis** — Currently synthesis still runs in the main thread and pushes through a small ring buffer to the PipeWire RT callback. The ideal architecture (like FluidSynth) synthesizes directly inside `on_process()`, eliminating the ring buffer entirely. Now that instruments are preloaded, the main remaining blocker is that `play_event()` still has other non-RT-safe operations (global mutable state, UI callbacks). Would require significant refactoring of the synthesis core.
+7. **RT-safe allocation mitigations** — Several malloc/free calls that were in the `doit()` → `play_event()` synthesis path have been eliminated:
+   - **Pan delay buffers**: Changed from per-note `safe_malloc`/`free` to a fixed `int32[PAN_DELAY_BUF_MAX]` array embedded in `struct Voice` (`playmidi.h:465`). Zero heap operations per note-on/off.
+   - **Reverb buffer**: Pre-allocated at startup via `init_reverb_buffer()` called from `preload_instruments()`, eliminating the lazy `safe_malloc` in `do_compute_data_midi()`.
+   - **Drum parts pool**: `playmidi_pool` mblock pre-grown at startup via `pregrow_playmidi_pool()` with room for 128 DrumParts entries, so `new_segment()` in `play_midi_setup_drums()` doesn't need to call `malloc`.
+   - **Effect chain nodes**: `push_effect()` and `free_effect_list()` now use a static pool of 32 `EffectList` nodes (`reverb.c`), falling back to malloc only if exhausted. The `info` blocks within each effect node are still heap-allocated.
+
+   Remaining non-RT-safe operations (diminishing returns / high refactoring cost):
+   - **Instrument loading on uncovered banks** (`playmidi.c:1338-1391`): `play_midi_load_instrument()` can still call `load_instrument()` (full disk I/O + many mallocs) if a MIDI bank select targets a bank not covered by preloading (non-GM banks not referenced in `timidity.cfg`).
+   - **Effect info blocks** (`reverb.c`): `alloc_effect()` still calls `safe_malloc` for effect info structs (up to 8KB each) which contain nested delay line buffers. Eliminating these would require refactoring each effect engine.
+   - **Drum effect buffers** (`playmidi.c:3332-3341`): `safe_malloc` for per-channel drum effect arrays when drum reverb/chorus/delay levels are configured.
+   - **`vfprintf` + `fflush` in `cmsg()`** (`pipewire_c.c:746-748`): stdio can malloc internally; `fflush` is a blocking syscall. Filtered by verbosity at default levels but risky with `-v`.
+
+8. **True pull-model synthesis** — Currently synthesis still runs in the main thread and pushes through a small ring buffer to the PipeWire RT callback. The ideal architecture (like FluidSynth) synthesizes directly inside `on_process()`, eliminating the ring buffer entirely. Now that instruments are preloaded, the main remaining blocker is that `play_event()` still has other non-RT-safe operations (global mutable state, UI callbacks, remaining malloc/free as listed above). Would require significant refactoring of the synthesis core.

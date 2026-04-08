@@ -47,6 +47,44 @@
 #include <math.h>
 #include <stdlib.h>
 
+#define EFFECT_NODE_POOL_SIZE 32
+static EffectList effect_node_pool[EFFECT_NODE_POOL_SIZE];
+static int effect_node_pool_init;
+static EffectList *effect_node_freelist;
+
+static EffectList *alloc_effect_node(void)
+{
+	EffectList *p;
+
+	if (!effect_node_pool_init) {
+		int i;
+		for (i = 0; i < EFFECT_NODE_POOL_SIZE; i++)
+			effect_node_pool[i].next_ef = (i + 1 < EFFECT_NODE_POOL_SIZE)
+				? &effect_node_pool[i + 1] : NULL;
+		effect_node_freelist = &effect_node_pool[0];
+		effect_node_pool_init = 1;
+	}
+	if (effect_node_freelist) {
+		p = effect_node_freelist;
+		effect_node_freelist = p->next_ef;
+	} else {
+		p = (EffectList *)safe_malloc(sizeof(EffectList));
+	}
+	memset(p, 0, sizeof(EffectList));
+	return p;
+}
+
+static void free_effect_node(EffectList *p)
+{
+	if (p >= &effect_node_pool[0] &&
+	    p < &effect_node_pool[EFFECT_NODE_POOL_SIZE]) {
+		p->next_ef = effect_node_freelist;
+		effect_node_freelist = p;
+	} else {
+		free(p);
+	}
+}
+
 #define SYS_EFFECT_PRE_LPF
 
 /* #define SYS_EFFECT_CLIP */
@@ -2668,8 +2706,7 @@ EffectList *push_effect(EffectList *efc, int type)
 {
 	EffectList *eft, *efn;
 	if (type == EFFECT_NONE) {return NULL;}
-	efn = (EffectList *)safe_malloc(sizeof(EffectList));
-	memset(efn, 0, sizeof(EffectList));
+	efn = alloc_effect_node();
 	efn->type = type;
 	efn->next_ef = NULL;
 	efn->info = NULL;
@@ -2713,7 +2750,7 @@ void free_effect_list(EffectList *ef)
 			efc->info = NULL;
 		}
 		efc->engine = NULL;
-		free(efc);
+		free_effect_node(efc);
 		efc = NULL;
 	} while ((efc = efn) != NULL);
 }

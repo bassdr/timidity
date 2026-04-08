@@ -130,6 +130,19 @@ void *new_segment(MBlockList *mblock, size_t nbytes)
     return addr;
 }
 
+void pregrow_mblock(MBlockList *mblock, size_t nbytes)
+{
+    /* Ensure the pool has at least nbytes of free space
+     * by pre-allocating a block if needed. */
+    if(!enough_block_memory(mblock, nbytes))
+    {
+	MBlockNode *p = new_mblock_node(nbytes);
+	p->next = mblock->first;
+	mblock->first = p;
+	mblock->allocated += p->block_size;
+    }
+}
+
 static void reuse_mblock1(MBlockNode *p)
 {
     if(p->block_size > MIN_MBLOCK_SIZE)

@@ -462,7 +462,7 @@ typedef struct {
   int32 delay_counter;
 
 #ifdef ENABLE_PAN_DELAY
-  int32 *pan_delay_buf, pan_delay_rpt, pan_delay_wpt, pan_delay_spt;
+  int32 pan_delay_buf[PAN_DELAY_BUF_MAX], pan_delay_rpt, pan_delay_wpt, pan_delay_spt;
 #endif	/* ENABLE_PAN_DELAY */
 } Voice;
 
@@ -602,6 +602,8 @@ extern void playmidi_output_changed(int play_state);
 extern Instrument *play_midi_load_instrument(int dr, int bk, int prog);
 extern void midi_program_change(int ch, int prog);
 extern void free_voice(int v);
+extern void pregrow_playmidi_pool(void);
+extern void init_reverb_buffer(void);
 extern void free_reverb_buffer(void);
 extern void play_midi_setup_drums(int ch,int note);
 

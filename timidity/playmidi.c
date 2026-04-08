@@ -1824,10 +1824,7 @@ void free_voice(int v1)
     int v2;
 
 #ifdef ENABLE_PAN_DELAY
-	if (voice[v1].pan_delay_buf != NULL) {
-		free(voice[v1].pan_delay_buf);
-		voice[v1].pan_delay_buf = NULL;
-	}
+	memset(voice[v1].pan_delay_buf, 0, sizeof(voice[v1].pan_delay_buf));
 #endif /* ENABLE_PAN_DELAY */
 
     v2 = voice[v1].chorus_link;
@@ -2269,10 +2266,6 @@ static void init_voice_pan_delay(int v)
 	int ch = vp->channel;
 	double pan_delay_diff; 
 
-	if (vp->pan_delay_buf != NULL) {
-		free(vp->pan_delay_buf);
-		vp->pan_delay_buf = NULL;
-	}
 	vp->pan_delay_rpt = 0;
 	if (opt_pan_delay && channel[ch].insertion_effect == 0 && !opt_surround_chorus) {
 		if (vp->panning == 64) {vp->delay += pan_delay_table[64] * play_mode->rate / 1000;}
@@ -2290,8 +2283,7 @@ static void init_voice_pan_delay(int v)
 		vp->pan_delay_wpt = 0;
 		vp->pan_delay_spt = vp->pan_delay_wpt - vp->pan_delay_rpt;
 		if (vp->pan_delay_spt < 0) {vp->pan_delay_spt += PAN_DELAY_BUF_MAX;}
-		vp->pan_delay_buf = (int32 *)safe_malloc(sizeof(int32) * PAN_DELAY_BUF_MAX);
-		memset(vp->pan_delay_buf, 0, sizeof(int32) * PAN_DELAY_BUF_MAX);
+		memset(vp->pan_delay_buf, 0, sizeof(vp->pan_delay_buf));
 	}
 #endif	/* ENABLE_PAN_DELAY */
 }
@@ -9005,6 +8997,18 @@ static void set_rx_drum(struct DrumParts *p, int32 rx, int flag)
 static int32 get_rx_drum(struct DrumParts *p, int32 rx)
 {
 	return (p->rx & rx);
+}
+
+void pregrow_playmidi_pool(void)
+{
+	pregrow_mblock(&playmidi_pool,
+		       128 * ((sizeof(struct DrumParts) + 7) & ~7));
+}
+
+void init_reverb_buffer(void)
+{
+	if (reverb_buffer == NULL)
+		reverb_buffer = (char *)safe_malloc(MAX_CHANNELS * AUDIO_BUFFER_SIZE * 8);
 }
 
 void free_reverb_buffer(void)

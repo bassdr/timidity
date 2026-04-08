@@ -871,7 +871,12 @@ static void stop_sequencer(void)
 {
 	stop_playing();
 	play_mode->acntl(PM_REQ_PLAY_END, NULL);
-	free_instruments(0);
+	/*
+	 * Don't free instruments here — they were preloaded before
+	 * the RT loop and must persist across start/stop cycles.
+	 * Freeing would force reload from disk on the next note-on,
+	 * causing latency spikes under SCHED_FIFO.
+	 */
 	free_global_mblock();
 	pwctx.active = 0;
 }
@@ -988,6 +993,18 @@ static void doit(void)
 		} else {
 			usleep(10000);
 		}
+
+		/*
+		 * Safety yield: under SCHED_FIFO the kernel won't
+		 * preempt us for lower-priority tasks.  If any of
+		 * the sleep/wait paths above return immediately
+		 * (e.g. PM_REQ_OUTPUT_READY finds room in the ring
+		 * buffer), we'd spin at RT priority and starve the
+		 * entire system.  sched_yield() gives other threads
+		 * (including PipeWire's audio callback) a chance to
+		 * run.  Under SCHED_OTHER this is a no-op.
+		 */
+		sched_yield();
 	}
 }
 
@@ -1008,6 +1025,40 @@ static RETSIGTYPE sig_reset(int sig)
 
 
 /*
+ * Preload all instruments so that no file I/O happens during the
+ * real-time synthesis loop.  load_instrument() opens SoundFont / GUS
+ * patch files from disk — that's fine at startup but causes
+ * nondeterministic latency spikes under SCHED_FIFO.
+ *
+ * Strategy: load every GM bank 0 program (melodic + drums), then
+ * sweep any additional banks the config references via
+ * load_missing_instruments().
+ */
+static void preload_instruments(void)
+{
+	int i, n = 0;
+
+	printf("Preloading instruments...\n");
+
+	/* GM bank 0: 128 melodic programs */
+	for (i = 0; i < 128; i++) {
+		if (play_midi_load_instrument(0, 0, i))
+			n++;
+	}
+
+	/* GM drumset 0: 128 percussion notes */
+	for (i = 0; i < 128; i++) {
+		if (play_midi_load_instrument(1, 0, i))
+			n++;
+	}
+
+	/* Any additional banks/drumsets referenced in timidity.cfg */
+	load_missing_instruments(NULL);
+
+	printf("Preloaded %d instruments\n", n);
+}
+
+/*
  * Set the process to realtime priority and lock memory.
  * mlockall prevents page faults during synthesis (latency spikes).
  * SCHED_FIFO ensures the synthesis thread isn't preempted by normal tasks.
@@ -1017,7 +1068,7 @@ static void set_realtime_priority(void)
 	struct sched_param schp;
 	int max_prio;
 
-	if (mlockall(MCL_CURRENT) == 0)
+	if (mlockall(MCL_CURRENT | MCL_FUTURE) == 0)
 		printf("mlockall: memory locked\n");
 	else
 		perror("mlockall (non-fatal, run as root or set memlock ulimit)");
@@ -1084,6 +1135,21 @@ static int ctl_pass_playing_list(int n, char *args[])
 		i += (i < 7) ? 5 : -7, j++;
 	j += note_key_offset, j -= floor(j / 12.0) * 12;
 	current_freq_table = j;
+
+	/*
+	 * Preload all instruments before entering the RT loop.
+	 * This eliminates file I/O (fopen/read) from the synthesis
+	 * path, which would cause latency spikes under SCHED_FIFO
+	 * and is the root cause of the instrument-change pop.
+	 */
+	preload_instruments();
+
+	/*
+	 * Override free_instruments_afterwards: we never want to free
+	 * preloaded instruments during RT operation (server_reset
+	 * checks this flag).
+	 */
+	free_instruments_afterwards = 0;
 
 	/*
 	 * Main loop.  On PipeWire daemon restart we tear down and

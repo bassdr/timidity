@@ -124,16 +124,18 @@ Remaining low-priority items (diminishing returns):
 
 Completed improvements for low-latency MIDI-to-speaker response:
 
-1. **mlockall + RT scheduling** — `mlockall(MCL_CURRENT | MCL_FUTURE)` at startup prevents page faults. `SCHED_FIFO` via `--realtime-priority=N` (now works for both `-iA` and `-ip`). PipeWire's `@pipewire` group ulimits provide the needed `memlock` and `rtprio` capabilities.
+1. **mlockall + RT scheduling** — `mlockall(MCL_CURRENT | MCL_FUTURE)` at startup prevents page faults. `SCHED_FIFO` via `--realtime-priority=N` (now works for both `-iA` and `-ip`). PipeWire's `@pipewire` group ulimits provide the needed `memlock` and `rtprio` capabilities. Priority 50 is a good default — well below PipeWire's audio thread (88), ensuring the audio callback always preempts synthesis.
 
 2. **Graceful underrun handling** — On buffer underrun, the PipeWire audio callback replays the last chunk with a linear fade-out instead of outputting silence. A faded repeat of ~5ms audio is perceptually invisible; a silence gap produces an audible click.
 
-3. **Demand-driven synthesis** — The PipeWire synthesis loop (`doit()` in `pipewire_c.c`) uses `PM_REQ_OUTPUT_READY` to wait on a condvar signaled by the audio callback, replacing the old fixed `usleep`. This paces synthesis to exactly when the ring buffer needs data. The `-B` flag is ignored in interactive mode; the ring buffer is auto-sized to 3× the 256-frame fragment size. Latency is controlled entirely by PipeWire's graph quantum (`default.clock.quantum` in `pipewire.conf`).
+3. **Demand-driven synthesis** — The PipeWire synthesis loop (`doit()` in `pipewire_c.c`) uses `PM_REQ_OUTPUT_READY` to wait on a condvar signaled by the audio callback, replacing the old fixed `usleep`. This paces synthesis to exactly when the ring buffer needs data. The `-B` flag is ignored in interactive mode; the ring buffer is auto-sized to 3× the 256-frame fragment size. Latency is controlled entirely by PipeWire's graph quantum (`default.clock.quantum` in `pipewire.conf`). A `sched_yield()` at the end of each loop iteration prevents CPU starvation if the condvar returns immediately.
 
 4. **PipeWire quantum config** — Ships `dist/pipewire/10-timidity-low-latency.conf` setting quantum to 128 frames (~2.7ms at 48kHz). Packagers install to `/usr/share/pipewire/pipewire.conf.avail/`; users activate via symlink to `/etc/pipewire/pipewire.conf.d/`.
 
 5. **Kernel PREEMPT_RT** — Documented in `dist/README.md`. `CONFIG_PREEMPT_RT=y` (mainline since Linux 6.12) reduces worst-case scheduling latency from ~10ms to ~0.1ms. Ebuild checks kernel config with `linux-info` eclass warnings.
 
+6. **Instrument preloading** — All GM bank 0 instruments (128 melodic + 128 drums) and any additional config-referenced banks are loaded at startup before entering the RT loop. Instruments are never freed during RT operation (`stop_sequencer` and `server_reset` skip `free_instruments`). This eliminates all file I/O (`fopen`/`read` in `load_instrument`) from the synthesis path, which was the root cause of audible pops on instrument changes and nondeterministic latency spikes under SCHED_FIFO. Memory cost is ~140 MB for FluidR3_GM.sf2 — the same as FluidSynth's approach of loading the entire SoundFont at startup.
+
 Remaining low-priority items:
 
-6. **True pull-model synthesis** — Currently synthesis still runs in the main thread and pushes through a small ring buffer to the PipeWire RT callback. The ideal architecture (like FluidSynth) synthesizes directly inside `on_process()`, eliminating the ring buffer entirely. This is blocked by `play_event()` potentially triggering instrument file I/O (disk reads), which cannot happen in an RT callback. Would require pre-loading all instruments or deferring loads to a separate thread.
+7. **True pull-model synthesis** — Currently synthesis still runs in the main thread and pushes through a small ring buffer to the PipeWire RT callback. The ideal architecture (like FluidSynth) synthesizes directly inside `on_process()`, eliminating the ring buffer entirely. Now that instruments are preloaded, the main remaining blocker is that `play_event()` still has other non-RT-safe operations (global mutable state, UI callbacks). Would require significant refactoring of the synthesis core.

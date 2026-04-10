@@ -408,6 +408,11 @@ static char *event_name(int type)
 #undef EVENT_NAME
 }
 
+static double fclamp(double val, double min, double max)
+{
+	return fmin(fmax(val, min), max);
+}
+
 /*! convert Hz to internal vibrato control ratio. */
 static FLOAT_T cnv_Hz_to_vib_ratio(FLOAT_T freq)
 {
@@ -1191,7 +1196,7 @@ void init_voice_filter(int i)
 void recompute_voice_filter(int v)
 {
 	int ch = voice[v].channel, note = voice[v].note;
-	double coef = 1.0, reso = 0, cent = 0, depth_cent = 0, freq;
+	double coef = 1.0, reso = 0, cent = 0, depth_cent = 0;
 	FilterCoefficients *fc = &(voice[v].fc);
 	Sample *sp = voice[v].sample;
 
@@ -1222,20 +1227,17 @@ void recompute_voice_filter(int v)
 	}
 
 	if(sp->vel_to_fc) {	/* velocity to filter cutoff frequency */
-		if(voice[v].velocity > sp->vel_to_fc_threshold)
-			cent += sp->vel_to_fc * (double)(127 - voice[v].velocity) / 127.0f;
-		else
-			cent += sp->vel_to_fc * (double)(127 - sp->vel_to_fc_threshold) / 127.0f;
+		cent += sp->vel_to_fc * (127. - fmax(voice[v].velocity, sp->vel_to_fc_threshold)) / 127.;
 	}
 	if(sp->vel_to_resonance) {	/* velocity to filter resonance */
 		reso += (double)voice[v].velocity * sp->vel_to_resonance / 127.0f / 10.0f;
 	}
 	if(sp->key_to_fc) {	/* filter cutoff key-follow */
-		cent += sp->key_to_fc/48. * (double)(voice[v].note - sp->key_to_fc_bpo);
+		cent += sp->key_to_fc * (double)(voice[v].note - sp->key_to_fc_bpo);
 	}
 
 	if(opt_modulation_envelope) {
-		if(voice[v].sample->tremolo_to_fc + (int16)depth_cent) {
+		if(voice[v].sample->tremolo_to_fc || depth_cent != 0) {
 			cent += ((double)voice[v].sample->tremolo_to_fc + depth_cent) * lookup_triangular(voice[v].tremolo_phase >> RATE_SHIFT);
 		}
 		if(voice[v].sample->modenv_to_fc) {
@@ -1245,22 +1247,16 @@ void recompute_voice_filter(int v)
 
 	if(cent != 0) {coef *= pow(2.0, cent / 1200.0f);}
 
-	freq = (double)fc->orig_freq * coef;
+	fc->freq = fclamp((double)fc->orig_freq * coef, 5., play_mode->rate / 2.);
 
-	if (freq > play_mode->rate / 2) {freq = play_mode->rate / 2;}
-	else if(freq < 5) {freq = 5;}
-	fc->freq = (int32)freq;
-
-	fc->reso_dB = fc->orig_reso_dB + channel[ch].resonance_dB + reso;
-	if(fc->reso_dB < 0.0f) {fc->reso_dB = 0.0f;}
-	else if(fc->reso_dB > 96.0f) {fc->reso_dB = 96.0f;}
+	fc->reso_dB = fclamp(fc->orig_reso_dB + channel[ch].resonance_dB + reso, 0., 96.);
 
 	if(fc->type == 1) {	/* Chamberlin filter */
 		if(fc->freq > play_mode->rate / 6) {
-			if (fc->start_flag == 0) {fc->type = 0;}	/* turn off. */ 
+			if (fc->start_flag == 0) {fc->type = 0;}	/* turn off. */
 			else {fc->freq = play_mode->rate / 6;}
 		}
-		if(fc->reso_dB > CHAMBERLIN_RESONANCE_MAX) {fc->reso_dB = CHAMBERLIN_RESONANCE_MAX;}
+		fc->reso_dB = fmin(fc->reso_dB, CHAMBERLIN_RESONANCE_MAX);
 	} else if(fc->type == 2) {	/* Moog VCF */
 		if(fc->reso_dB > fc->orig_reso_dB / 2) {
 			fc->gain = pow(10.0f, (fc->reso_dB - fc->orig_reso_dB / 2) / 20.0f);

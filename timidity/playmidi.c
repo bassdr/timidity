@@ -949,11 +949,12 @@ void recompute_freq(int v)
 #endif	/* ABORT_AT_FATAL */
 }
 
-static int32 calc_velocity(int32 ch,int32 vel)
+static uint8 calc_velocity(int32 ch,int32 vel)
 {
 	int32 velocity;
 	velocity = channel[ch].velocity_sense_depth * vel / 64 + (channel[ch].velocity_sense_offset - 64) * 2;
-	if(velocity > 127) {velocity = 127;}
+	if(velocity > 127) return 127;
+	if(velocity < 0) return 0;
 	return velocity;
 }
 
@@ -973,26 +974,33 @@ static void recompute_voice_tremolo(int v)
 }
 
 /* Compute SF2 velocity amplitude using the concave curve.
- * Returns a value in [0, 127] range, compatible with perceived_vol_table[]. */
-static FLOAT_T sf2_velocity_amp(int velocity, int16 vel_to_atten)
+ * Returns a value in [0, 127] range, compatible with perceived_vol_table[].
+ *
+ * sf2_vel_cb_table[] stores real centibels (0.1 dB per unit):
+ *   sf2_vel_cb_table[v] = -200 * log10(v/127)   for v > 0
+ *   sf2_vel_cb_table[0] = 960
+ *
+ * We must convert to linear amplitude using the correct formula:
+ *   amplitude = 10^(-cB / 200)
+ *
+ * Note: cb_to_amp_table[] cannot be used here because it uses a different
+ * scale (2^(-i/160), i.e. ~0.038 dB/unit) that was designed for TiMidity's
+ * internal initialAttenuation handling, not real centibels. */
+static FLOAT_T sf2_velocity_amp(uint8 velocity, int16 vel_to_atten)
 {
 	FLOAT_T atten_cb;
-	int atten_idx;
 
 	if (vel_to_atten == 0)
 		return 127.0;  /* modulator disabled: flat velocity response */
-	atten_cb = sf2_vel_cb_table[velocity] * vel_to_atten / 960.0;
-	atten_idx = (int)(atten_cb + 0.5);
-	if (atten_idx < 0) atten_idx = 0;
-	if (atten_idx > 960) atten_idx = 960;
-	return cb_to_amp_table[atten_idx] * 127.0;
+	atten_cb = fclamp(sf2_vel_cb_table[velocity] * vel_to_atten / 960., 0., 960.);
+	return pow(10., -atten_cb / 200.) * 127.;
 }
 
 static void recompute_amp(int v)
 {
 	FLOAT_T tempamp;
 	int ch = voice[v].channel;
-	int32 vel = calc_velocity(ch, voice[v].velocity);
+	uint8 vel = calc_velocity(ch, voice[v].velocity);
 
 	/* For SF2 instruments, use the SF2 concave velocity->attenuation
 	 * curve with the per-sample resolved modulator amount.

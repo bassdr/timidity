@@ -1141,6 +1141,28 @@ void init_perceived_vol_table(void)
 				127.0 * pow((double)i / 127.0, 1.66096404744);
 }
 
+/* SF2 concave negative unipolar curve: maps velocity (0-127) to centibels
+ * of attenuation (960-0).  Used with vel_to_atten to compute proper SF2
+ * velocity-to-volume scaling.
+ *
+ * Formula: sf2_vel_cb_table[v] = -200 * log10(v/127) for v > 0, 960 for v = 0.
+ * Multiplied by vel_to_atten/960 and fed into cb_to_amp_table[] at runtime.
+ */
+FLOAT_T sf2_vel_cb_table[128];
+
+void init_sf2_vel_cb_table(void)
+{
+	int i;
+
+	sf2_vel_cb_table[0] = 960.0;
+	for (i = 1; i < 128; i++) {
+		double cb = -200.0 * log10((double)i / 127.0);
+		if (cb > 960.0) cb = 960.0;
+		if (cb < 0.0) cb = 0.0;
+		sf2_vel_cb_table[i] = cb;
+	}
+}
+
 FLOAT_T gm2_vol_table[128];
 
 void init_gm2_vol_table(void)

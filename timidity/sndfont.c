@@ -1765,18 +1765,44 @@ static int mod_src_is_linear(uint16 src_oper)
 	return (src_oper & SF_MOD_TYPE_MASK) == SF_MOD_TYPE_LINEAR;
 }
 
+/* Check if a modulator source uses a concave curve */
+static int mod_src_is_concave(uint16 src_oper)
+{
+	return (src_oper & SF_MOD_TYPE_MASK) == SF_MOD_TYPE_CONCAVE;
+}
+
 /* Process a resolved modulator and map it to Sample fields.
  * Amounts are ADDED to existing values since multiple SF2 modulators
  * can target the same generator and their outputs sum at runtime.
  * Returns 1 if handled, 0 if skipped. */
 static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
 {
-	if (amount == 0)
+	if (amount == 0) {
+		/* For velocity->initialAttenuation, amount=0 means the
+		 * instrument explicitly disables velocity volume scaling.
+		 * Store 0 so recompute_amp knows to use flat response. */
+		if (mod->amt_src_oper == 0 &&
+		    mod_src_is_velocity(mod->src_oper) &&
+		    mod_src_is_concave(mod->src_oper) &&
+		    mod->dest_oper == SF_initAtten) {
+			sp->vel_to_atten = 0;
+			return 1;
+		}
 		return 1; /* effectively disabled, nothing to do */
+	}
 
 	/* Only handle single-source modulators with no secondary source */
 	if (mod->amt_src_oper != 0)
 		return 0;
+
+	/* Handle concave velocity->initialAttenuation (SF2 default mod #1).
+	 * The concave curve is evaluated at runtime using sf2_vel_cb_table[]. */
+	if (mod_src_is_velocity(mod->src_oper) &&
+	    mod_src_is_concave(mod->src_oper) &&
+	    mod->dest_oper == SF_initAtten) {
+		sp->vel_to_atten = amount;
+		return 1;
+	}
 
 	/* Only handle linear-curve sources -- non-linear curves (concave,
 	 * convex, switch) can't be represented by the existing fields */
@@ -1792,34 +1818,40 @@ static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
 			sp->vel_to_resonance += amount;
 			return 1;
 		case SF_attackEnv2:
-			sp->envelope_velf[0] += amount;
+			/* SF2 modulator amount is full-range timecents (output =
+			 * (127-vel)/127 * amount).  Convert to timecents/key for
+			 * the runtime formula: rate *= 2^((vel-bpo)*velf/1200). */
+			sp->envelope_velf[0] += (int16)lround(amount / 127.0);
 			return 1;
 		case SF_holdEnv2:
-			sp->envelope_velf[1] += amount;
+			sp->envelope_velf[1] += (int16)lround(amount / 127.0);
 			return 1;
 		case SF_decayEnv2:
-			sp->envelope_velf[2] += amount;
+			sp->envelope_velf[2] += (int16)lround(amount / 127.0);
 			return 1;
 		case SF_releaseEnv2:
-			sp->envelope_velf[4] += amount;
+			sp->envelope_velf[4] += (int16)lround(amount / 127.0);
 			return 1;
 		case SF_attackEnv1:
-			sp->modenv_velf[0] += amount;
+			sp->modenv_velf[0] += (int16)lround(amount / 127.0);
 			return 1;
 		case SF_holdEnv1:
-			sp->modenv_velf[1] += amount;
+			sp->modenv_velf[1] += (int16)lround(amount / 127.0);
 			return 1;
 		case SF_decayEnv1:
-			sp->modenv_velf[2] += amount;
+			sp->modenv_velf[2] += (int16)lround(amount / 127.0);
 			return 1;
 		case SF_releaseEnv1:
-			sp->modenv_velf[4] += amount;
+			sp->modenv_velf[4] += (int16)lround(amount / 127.0);
 			return 1;
 		}
 	} else if (mod_src_is_key(mod->src_oper)) {
 		switch (mod->dest_oper) {
 		case SF_initialFilterFc:
-			sp->key_to_fc += amount;
+			/* SF2 modulator amount is full-range cents (output =
+			 * key/127 * amount).  Convert to cents/key for the
+			 * runtime formula: cent += key_to_fc * (note - bpo). */
+			sp->key_to_fc += (int16)lround(amount / 127.0);
 			return 1;
 		}
 	}
@@ -1870,13 +1902,17 @@ static void resolve_modulators(SFMods *mods, Sample *sp)
 {
 	int i, found;
 
-	/* Set defaults that don't come from modulators */
-	sp->envelope_velf_bpo = sp->modenv_velf_bpo =
-		sp->vel_to_fc_threshold = 64;
+	/* Set defaults that don't come from modulators.
+	 * SF2 velocity modulators are negative unipolar: source = (127-vel)/127.
+	 * At vel=127, source=0 (no contribution), so bpo=127 aligns TiMidity's
+	 * rate formula pow(2, (vel-bpo)*velf/1200) with the SF2 semantics. */
+	sp->envelope_velf_bpo = sp->modenv_velf_bpo = 127;
+	sp->vel_to_fc_threshold = 64;
 	sp->key_to_fc_bpo = 60;
 	sp->vel_to_fc = 0;
 	sp->key_to_fc = 0;
 	sp->vel_to_resonance = 0;
+	sp->vel_to_atten = 960;  /* SF2 default: 960 cB (full concave curve) */
 	memset(sp->envelope_velf, 0, sizeof(sp->envelope_velf));
 	memset(sp->modenv_velf, 0, sizeof(sp->modenv_velf));
 
@@ -1884,7 +1920,7 @@ static void resolve_modulators(SFMods *mods, Sample *sp)
 	for (i = 0; i < (int)NUM_SF2_DEFAULT_MODS; i++) {
 		const SFModRec *def = &sf2_default_mods[i];
 		int16 amount = resolve_single_mod(def, def->amount, mods);
-		apply_mod_to_sample(def, amount, sp);
+		found = apply_mod_to_sample(def, amount, sp);
 	}
 
 	/* Phase 2: Process custom instrument zone modulators.

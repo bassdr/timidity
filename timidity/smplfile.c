@@ -1102,6 +1102,7 @@ static void initialize_sample(Instrument *inst, int frames, int sample_bits, int
 		sample->cutoff_freq = sample->resonance = sample->tremolo_to_pitch = 
 			sample->tremolo_to_fc = sample->modenv_to_pitch = sample->modenv_to_fc =
 			sample->vel_to_fc = sample->key_to_fc = sample->vel_to_resonance = 0;
+		sample->vel_to_atten = -1;  /* use default perceived_vol_table */
 		sample->envelope_velf_bpo = sample->modenv_velf_bpo =
 			sample->vel_to_fc_threshold = 64;
 		sample->key_to_fc_bpo = 60;

@@ -699,6 +699,7 @@ void load_module_samples (SAMPLE * s, int numsamples, int ntsc)
 	sp->cutoff_freq = sp->resonance = sp->tremolo_to_pitch = 
 		sp->tremolo_to_fc = sp->modenv_to_pitch = sp->modenv_to_fc =
 		sp->vel_to_fc = sp->key_to_fc = sp->vel_to_resonance = 0;
+	sp->vel_to_atten = -1;  /* use default perceived_vol_table */
 	sp->envelope_velf_bpo = sp->modenv_velf_bpo =
 		sp->vel_to_fc_threshold = 64;
 	sp->key_to_fc_bpo = 60;

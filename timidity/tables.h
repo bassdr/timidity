@@ -78,6 +78,7 @@ extern FLOAT_T sc_drum_level_table[];
 extern FLOAT_T sb_vol_table[];
 extern FLOAT_T modenv_vol_table[];
 extern float cb_to_amp_table[];
+extern FLOAT_T sf2_vel_cb_table[];
 extern float reverb_time_table[];
 extern float pan_delay_table[];
 extern float chamberlin_filter_db_to_q_table[];
@@ -108,6 +109,7 @@ extern void init_modenv_vol_table(void);
 extern void init_def_vol_table(void);
 extern void init_gs_vol_table(void);
 extern void init_perceived_vol_table(void);
+extern void init_sf2_vel_cb_table(void);
 extern void init_gm2_vol_table(void);
 extern void init_user_vol_table(FLOAT_T power);
 

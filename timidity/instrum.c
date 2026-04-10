@@ -747,6 +747,7 @@ fail:
 		sp->tremolo_to_pitch = sp->tremolo_to_fc = 0;
 		sp->modenv_to_pitch = sp->modenv_to_fc = 0;
 		sp->vel_to_fc = sp->key_to_fc = sp->vel_to_resonance = 0;
+		sp->vel_to_atten = -1;  /* use default perceived_vol_table */
 		sp->envelope_velf_bpo = sp->modenv_velf_bpo = 64;
 		sp->vel_to_fc_threshold = 64;
 		sp->key_to_fc_bpo = 60;
@@ -1095,7 +1096,7 @@ Instrument *load_instrument(int dr, int b, int prog)
 		/* filter velocity-follow */
 		if (ip != NULL && bank->tone[prog].vel_to_fc != 0)
 			for (i = 0; i < ip->samples; i++)
-				ip->sample[i].key_to_fc = bank->tone[prog].vel_to_fc;
+				ip->sample[i].vel_to_fc = bank->tone[prog].vel_to_fc;
 		/* resonance velocity-follow */
 		if (ip != NULL && bank->tone[prog].vel_to_resonance != 0)
 			for (i = 0; i < ip->samples; i++)

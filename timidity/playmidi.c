@@ -967,10 +967,36 @@ static void recompute_voice_tremolo(int v)
 	vp->tremolo_depth = depth;
 }
 
+/* Compute SF2 velocity amplitude using the concave curve.
+ * Returns a value in [0, 127] range, compatible with perceived_vol_table[]. */
+static FLOAT_T sf2_velocity_amp(int velocity, int16 vel_to_atten)
+{
+	FLOAT_T atten_cb;
+	int atten_idx;
+
+	if (vel_to_atten == 0)
+		return 127.0;  /* modulator disabled: flat velocity response */
+	atten_cb = sf2_vel_cb_table[velocity] * vel_to_atten / 960.0;
+	atten_idx = (int)(atten_cb + 0.5);
+	if (atten_idx < 0) atten_idx = 0;
+	if (atten_idx > 960) atten_idx = 960;
+	return cb_to_amp_table[atten_idx] * 127.0;
+}
+
 static void recompute_amp(int v)
 {
 	FLOAT_T tempamp;
 	int ch = voice[v].channel;
+	int32 vel = calc_velocity(ch, voice[v].velocity);
+
+	/* For SF2 instruments, use the SF2 concave velocity->attenuation
+	 * curve with the per-sample resolved modulator amount.
+	 * vel_to_atten >= 0 means this is an SF2 sample with a resolved
+	 * modulator; -1 means use the default table for the system mode. */
+	FLOAT_T vel_amp;
+	int use_sf2_vel = (voice[v].sample->vel_to_atten >= 0);
+	if (use_sf2_vel)
+		vel_amp = sf2_velocity_amp(vel, voice[v].sample->vel_to_atten);
 
 	/* master_volume and sample->volume are percentages, used to scale
 	 *  amplitude directly, NOT perceived volume
@@ -981,31 +1007,31 @@ static void recompute_amp(int v)
 	if (opt_user_volume_curve) {
 	tempamp = master_volume *
 		   voice[v].sample->volume *
-		   user_vol_table[calc_velocity(ch, voice[v].velocity)] *
+		   (use_sf2_vel ? vel_amp : user_vol_table[vel]) *
 		   user_vol_table[channel[ch].volume] *
 		   user_vol_table[channel[ch].expression]; /* 21 bits */
 	} else if (play_system_mode == GM2_SYSTEM_MODE) {
 	tempamp = master_volume *
 		  voice[v].sample->volume *
-		  gm2_vol_table[calc_velocity(ch, voice[v].velocity)] *	/* velocity: not in GM2 standard */
+		  (use_sf2_vel ? vel_amp : gm2_vol_table[vel]) *
 		  gm2_vol_table[channel[ch].volume] *
 		  gm2_vol_table[channel[ch].expression]; /* 21 bits */
-	} else if(play_system_mode == GS_SYSTEM_MODE) {	/* use measured curve */ 
+	} else if(play_system_mode == GS_SYSTEM_MODE) {	/* use measured curve */
 	tempamp = master_volume *
 		   voice[v].sample->volume *
-		   sc_vel_table[calc_velocity(ch, voice[v].velocity)] *
+		   (use_sf2_vel ? vel_amp : sc_vel_table[vel]) *
 		   sc_vol_table[channel[ch].volume] *
 		   sc_vol_table[channel[ch].expression]; /* 21 bits */
 	} else if (IS_CURRENT_MOD_FILE) {	/* use linear curve */
 	tempamp = master_volume *
 		  voice[v].sample->volume *
-		  calc_velocity(ch, voice[v].velocity) *
+		  (use_sf2_vel ? vel_amp : (FLOAT_T)vel) *
 		  channel[ch].volume *
 		  channel[ch].expression; /* 21 bits */
 	} else {	/* use generic exponential curve */
 	tempamp = master_volume *
 		  voice[v].sample->volume *
-		  perceived_vol_table[calc_velocity(ch, voice[v].velocity)] *
+		  (use_sf2_vel ? vel_amp : perceived_vol_table[vel]) *
 		  perceived_vol_table[channel[ch].volume] *
 		  perceived_vol_table[channel[ch].expression]; /* 21 bits */
 	}
@@ -1167,7 +1193,7 @@ void recompute_voice_filter(int v)
 	int ch = voice[v].channel, note = voice[v].note;
 	double coef = 1.0, reso = 0, cent = 0, depth_cent = 0, freq;
 	FilterCoefficients *fc = &(voice[v].fc);
-	Sample *sp = (Sample *) &voice[v].sample;
+	Sample *sp = voice[v].sample;
 
 	if(fc->type == 0) {return;}
 	coef = channel[ch].cutoff_freq_coef;
@@ -1199,13 +1225,13 @@ void recompute_voice_filter(int v)
 		if(voice[v].velocity > sp->vel_to_fc_threshold)
 			cent += sp->vel_to_fc * (double)(127 - voice[v].velocity) / 127.0f;
 		else
-			coef += sp->vel_to_fc * (double)(127 - sp->vel_to_fc_threshold) / 127.0f;
+			cent += sp->vel_to_fc * (double)(127 - sp->vel_to_fc_threshold) / 127.0f;
 	}
 	if(sp->vel_to_resonance) {	/* velocity to filter resonance */
 		reso += (double)voice[v].velocity * sp->vel_to_resonance / 127.0f / 10.0f;
 	}
 	if(sp->key_to_fc) {	/* filter cutoff key-follow */
-		cent += sp->key_to_fc * (double)(voice[v].note - sp->key_to_fc_bpo);
+		cent += sp->key_to_fc/48. * (double)(voice[v].note - sp->key_to_fc_bpo);
 	}
 
 	if(opt_modulation_envelope) {
@@ -2414,6 +2440,7 @@ static void start_note(MidiEvent *e, int i, int vid, int cnt)
   voice[i].timeout = -1;
   if(!prescanning_flag)
       ctl_note_event(i);
+
 }
 
 static void finish_note(int i)

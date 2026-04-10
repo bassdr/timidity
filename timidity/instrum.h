@@ -53,6 +53,7 @@ typedef struct _Sample {
 	  envelope_keyf[6], envelope_velf[6], modenv_keyf[6], modenv_velf[6],
 	  vel_to_fc, key_to_fc;
   int16 vel_to_resonance;	/* in centibels, [-960, 960] */
+  int16 vel_to_atten;		/* SF2 velocity->initialAttenuation amount in cB, -1 = use default curve */
   int8 envelope_velf_bpo, modenv_velf_bpo,
 	  key_to_fc_bpo, vel_to_fc_threshold;	/* in notes */
   int32 vibrato_delay, tremolo_delay, envelope_delay, modenv_delay;	/* in samples */

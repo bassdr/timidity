@@ -1184,6 +1184,15 @@ static int ctl_pass_playing_list(int n, char *args[])
 				pw_teardown();
 				break;
 			}
+			/*
+			 * The PipeWire audio output installs its own
+			 * SIGINT/SIGTERM handler (pw_sigterm_exit) which
+			 * only sets `intr` and `ctx.running = 0` but not
+			 * `quit_flag`.  Reinstall ours so the main loop
+			 * sees quit_flag and exits cleanly.
+			 */
+			signal(SIGINT, sig_quit);
+			signal(SIGTERM, sig_quit);
 		}
 
 		set_realtime_priority();

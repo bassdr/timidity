@@ -1804,6 +1804,15 @@ static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
 		return 1;
 	}
 
+	/* Handle concave velocity->modEnvToFilterFc.  The concave curve is
+	 * evaluated at runtime using sf2_vel_cb_table[]. */
+	if (mod_src_is_velocity(mod->src_oper) &&
+	    mod_src_is_concave(mod->src_oper) &&
+	    mod->dest_oper == SF_env1ToFilterFc) {
+		sp->vel_to_modenv_to_fc_cc += amount;
+		return 1;
+	}
+
 	/* Only handle linear-curve sources -- non-linear curves (concave,
 	 * convex, switch) can't be represented by the existing fields */
 	if (!mod_src_is_linear(mod->src_oper))
@@ -1816,6 +1825,9 @@ static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
 			return 1;
 		case SF_initialFilterQ:
 			sp->vel_to_resonance += amount;
+			return 1;
+		case SF_env1ToFilterFc:
+			sp->vel_to_modenv_to_fc += amount;
 			return 1;
 		case SF_attackEnv2:
 			/* SF2 modulator amount is full-range timecents (output =
@@ -1848,10 +1860,17 @@ static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
 	} else if (mod_src_is_key(mod->src_oper)) {
 		switch (mod->dest_oper) {
 		case SF_initialFilterFc:
-			/* SF2 modulator amount is full-range cents (output =
-			 * key/127 * amount).  Convert to cents/key for the
-			 * runtime formula: cent += key_to_fc * (note - bpo). */
-			sp->key_to_fc += (int16)lround(amount / 127.0);
+			if (mod->src_oper & SF_MOD_POLAR_BIPOLAR) {
+				/* Bipolar: output = (2*key/127 - 1) * amount
+				 * = 2*amount/127 * (key - 63.5).
+				 * Map to runtime: cent += key_to_fc * (note - bpo) */
+				sp->key_to_fc += (int16)lround(2.0 * amount / 127.0);
+				sp->key_to_fc_bpo = 64;
+			} else {
+				/* Unipolar: output = key/127 * amount
+				 * = amount/127 * (key - 0) */
+				sp->key_to_fc += (int16)lround(amount / 127.0);
+			}
 			return 1;
 		}
 	}
@@ -1912,6 +1931,8 @@ static void resolve_modulators(SFMods *mods, Sample *sp)
 	sp->vel_to_fc = 0;
 	sp->key_to_fc = 0;
 	sp->vel_to_resonance = 0;
+	sp->vel_to_modenv_to_fc = 0;
+	sp->vel_to_modenv_to_fc_cc = 0;
 	sp->vel_to_atten = 960;  /* SF2 default: 960 cB (full concave curve) */
 	memset(sp->envelope_velf, 0, sizeof(sp->envelope_velf));
 	memset(sp->modenv_velf, 0, sizeof(sp->modenv_velf));

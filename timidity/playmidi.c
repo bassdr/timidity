@@ -1248,8 +1248,19 @@ void recompute_voice_filter(int v)
 		if(voice[v].sample->tremolo_to_fc || depth_cent != 0) {
 			cent += ((double)voice[v].sample->tremolo_to_fc + depth_cent) * lookup_triangular(voice[v].tremolo_phase >> RATE_SHIFT);
 		}
-		if(voice[v].sample->modenv_to_fc) {
-			cent += (double)voice[v].sample->modenv_to_fc * voice[v].last_modenv_volume;
+		if (sp->modenv_to_fc || sp->vel_to_modenv_to_fc && voice[v].velocity || sp->vel_to_modenv_to_fc_cc) {
+			/* Total modenv→filterFc = generator amount + velocity modulators.
+			 * Linear: vel/127 * amount (positive unipolar).
+			 * Concave: (1 - sf2_vel_cb_table[vel]/960) * amount (positive unipolar). */
+			double modenv_fc = (double)sp->modenv_to_fc;
+			if(sp->vel_to_modenv_to_fc) {
+				modenv_fc += sp->vel_to_modenv_to_fc * (double)voice[v].velocity / 127.0;
+			}
+			if(sp->vel_to_modenv_to_fc_cc) {
+				modenv_fc += sp->vel_to_modenv_to_fc_cc
+					* (1.0 - sf2_vel_cb_table[voice[v].velocity] / 960.0);
+			}
+			cent += modenv_fc * voice[v].last_modenv_volume;
 		}
 	}
 

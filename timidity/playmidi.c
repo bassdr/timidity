@@ -8910,6 +8910,7 @@ void playmidi_stream_init(void)
     change_system_mode(DEFAULT_SYSTEM_MODE);
     reset_midi(0);
 
+    aq_flush(0);
     playmidi_tmr_reset();
 }
 
@@ -8917,13 +8918,12 @@ void playmidi_tmr_reset(void)
 {
     int i;
 
-    aq_flush(0);
     if(ctl->id_character != 'N')
         current_sample = 0;
     buffered_count = 0;
     buffer_pointer = common_buffer;
     for(i = 0; i < MAX_CHANNELS; i++)
-	channel[i].lasttime = 0;
+        channel[i].lasttime = 0;
 }
 
 void playmidi_stream_free(void)

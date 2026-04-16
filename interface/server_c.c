@@ -574,6 +574,8 @@ static void tmr_reset(void)
     curr_event_samples =
 	event_time_offset =
 	    sample_cum = 0;
+
+    aq_flush(0);
     playmidi_tmr_reset();
     curr_timebase = DEFAULT_TIMEBASE;
     curr_tick = tick_offs = 0;

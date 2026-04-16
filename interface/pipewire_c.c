@@ -156,9 +156,9 @@ static inline void midibuf_pop(struct midi_ringbuf *rb)
 
 static inline void midibuf_clear(struct midi_ringbuf *rb)
 {
-	rb->rdptr = rb->wrptr = 0;
+	__atomic_store_n(&rb->rdptr, 0, __ATOMIC_SEQ_CST);
+	__atomic_store_n(&rb->wrptr, 0, __ATOMIC_SEQ_CST);
 }
-
 
 /*
  * PipeWire MIDI context
@@ -177,9 +177,10 @@ struct pw_midi_ctx {
 	struct midi_ringbuf midibuf;
 
 	/* timing */
-	long cur_time_offset;
+	int32 cur_time_offset;
 	int buffer_time_advance;
-	long buffer_time_offset;
+	int32 buffer_time_offset;
+	uint8 epoch;
 
 	/* file output pacing: sync audio clock to wall clock */
 	int file_output;
@@ -825,6 +826,13 @@ static void process_midi_message(const uint8_t *data, uint32_t len)
 		seq_play_event(&ev);
 }
 
+static inline void pwctx_reset_timebase(void)
+{
+	pwctx.buffer_time_offset = 0;
+	pwctx.cur_time_offset = 0;
+	pwctx.epoch++;
+	clock_gettime(CLOCK_MONOTONIC, &pwctx.start_ts);
+}
 
 /*
  * Server reset and sequencer start/stop
@@ -833,10 +841,13 @@ static void server_reset(void)
 {
 	readmidi_read_init();
 	playmidi_stream_init();
+
 	if (free_instruments_afterwards)
 		free_instruments(0);
+
 	reduce_voice_threshold = 0;
-	pwctx.buffer_time_offset = 0;
+
+	pwctx_reset_timebase();
 }
 
 static int start_sequencer(void)
@@ -847,11 +858,11 @@ static int start_sequencer(void)
 			 play_mode->id_name, play_mode->id_character);
 		return 0;
 	}
+
 	pwctx.active = 1;
-	pwctx.buffer_time_offset = 0;
-	pwctx.cur_time_offset = 0;
-	if (pwctx.file_output)
-		clock_gettime(CLOCK_MONOTONIC, &pwctx.start_ts);
+
+	pwctx_reset_timebase();
+
 	return 1;
 }
 
@@ -904,6 +915,10 @@ static RETSIGTYPE sig_quit(int sig)
 static void doit(void)
 {
 	struct midi_msg *msg;
+	static uint32 local_epoch = 0;
+	static uint8 rebase_pending = 0;
+	static const int32 REBASE_THRESHOLD = INT_MAX / 2;       /* ~6.2h at 48kHz: schedule rebase */
+	static const int32 REBASE_DEADLINE  = INT_MAX / 5 * 4;   /* ~9.9h at 48kHz: force rebase */
 
 	for (;;) {
 		if (quit_flag || pw_disconnected)
@@ -924,6 +939,41 @@ static void doit(void)
 		 * audio driver or a file encoder.
 		 */
 		pwctx.cur_time_offset = pwctx.buffer_time_offset;
+
+		if (!rebase_pending) {
+			if (pwctx.buffer_time_offset >= REBASE_THRESHOLD) {
+				ctl.cmsg(CMSG_INFO, VERB_VERBOSE, "TiMidity: timebase rebase pending");
+				rebase_pending = 1;
+			}
+		} else {
+			int do_rebase = 0;
+			if (upper_voices == 0) {
+				ctl.cmsg(CMSG_INFO, VERB_VERBOSE, "TiMidity: timebase rebase: clean (no active voices)");
+				do_rebase = 1;
+			} else if (pwctx.buffer_time_offset >= REBASE_DEADLINE) {
+				ctl.cmsg(CMSG_INFO, VERB_VERBOSE, "TiMidity: timebase rebase: deadline forced");
+				/* silence held notes before rebasing */
+				MidiEvent ev = {0};
+				ev.type = ME_ALL_NOTES_OFF;
+				ev.time = pwctx.cur_time_offset;
+				for (ev.channel = 0; ev.channel < 16; ev.channel++)
+					play_event(&ev);
+				do_rebase = 1;
+			}
+
+			if (do_rebase) {
+				playmidi_tmr_reset();
+				pwctx_reset_timebase();
+				rebase_pending = 0;
+			}
+		}
+
+		if (local_epoch != pwctx.epoch) {
+			ctl.cmsg(CMSG_INFO, VERB_VERBOSE, "TiMidity: new epoch %u", (unsigned)pwctx.epoch);
+
+			local_epoch = pwctx.epoch;
+			midibuf_clear(&pwctx.midibuf);
+		}
 
 		/* drain all pending MIDI messages */
 		while ((msg = midibuf_peek(&pwctx.midibuf)) != NULL) {
@@ -1112,10 +1162,38 @@ static void reset_realtime_priority(void)
 		perror("munlockall (non-fatal, run as root or set memlock ulimit)");
 }
 
+// Normalize value into [0, 11]
+static inline int normalize_mod12(int value)
+{
+	value %= 12;
+	if (value < 0)
+		value += 12;
+	return value;
+}
+
+static int compute_freq_table_index(int current_keysig,
+                                    int note_key_offset)
+{
+	int i = current_keysig < 8 ? current_keysig + 7 : current_keysig - 9;
+	int j = 0;
+
+	while (i != 7) {
+		if (j > 12)
+			return 0;  // should not happen, avoid infinite loop
+
+		if (i < 7)
+			i += 5;
+		else
+			i -= 7;
+
+		j++;
+	}
+
+	return normalize_mod12(j + note_key_offset);
+}
+
 static int ctl_pass_playing_list(int n, char *args[])
 {
-	int i, j;
-
 #ifdef SIGPIPE
 	signal(SIGPIPE, SIG_IGN);
 #endif
@@ -1138,11 +1216,7 @@ static int ctl_pass_playing_list(int n, char *args[])
 	signal(SIGTERM, sig_quit);
 	signal(SIGHUP, sig_reset);
 
-	i = current_keysig + ((current_keysig < 8) ? 7 : -9), j = 0;
-	while (i != 7)
-		i += (i < 7) ? 5 : -7, j++;
-	j += note_key_offset, j -= floor(j / 12.0) * 12;
-	current_freq_table = j;
+	current_freq_table = compute_freq_table_index(current_keysig, note_key_offset);
 
 	/*
 	 * Preload all instruments before entering the RT loop.
@@ -1221,7 +1295,6 @@ static int ctl_pass_playing_list(int n, char *args[])
 			pwctx.buffer_time_advance = audio_buffer_size;
 			pwctx.file_output = 1;
 		}
-		pwctx.buffer_time_offset = 0;
 
 		for (;;) {
 			server_reset();

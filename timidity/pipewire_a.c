@@ -774,7 +774,7 @@ static int acntl(int request, void *arg)
 				pthread_cond_timedwait(&ctx.cond, &ctx.lock, &ts);
 			}
 			pthread_mutex_unlock(&ctx.lock);
-			return 0;
+			return __atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE) ? 0 : -1;
 		}
 	}
 	return -1;

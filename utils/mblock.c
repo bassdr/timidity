@@ -43,7 +43,7 @@
 #include "mblock.h"
 
 static MBlockNode *free_mblock_list = NULL;
-#define ADDRALIGN 8
+#define ADDRALIGN 8u
 /* #define DEBUG */
 
 void init_mblock(MBlockList *mblock)
@@ -105,7 +105,7 @@ void *new_segment(MBlockList *mblock, size_t nbytes)
     void *addr;
 
     /* round up to ADDRALIGN */
-    nbytes = ((nbytes + ADDRALIGN - 1) & ~(ADDRALIGN - 1));
+    nbytes = ((nbytes + ADDRALIGN - 1u) & ~(ADDRALIGN - 1u));
     if(!enough_block_memory(mblock, nbytes))
     {
 	p = new_mblock_node(nbytes);
@@ -177,12 +177,11 @@ void reuse_mblock(MBlockList *mblock)
 
 char *strdup_mblock(MBlockList *mblock, const char *str)
 {
-    int len;
     char *p;
 
-    len = strlen(str);
-    p = (char *)new_segment(mblock, len + 1); /* for '\0' */
-    memcpy(p, str, len + 1);
+    size_t len = strlen(str);
+    p = (char *)new_segment(mblock, len + 1u); /* for '\0' */
+    memcpy(p, str, len + 1u);
     return p;
 }
 

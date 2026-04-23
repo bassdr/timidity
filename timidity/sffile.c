@@ -533,7 +533,6 @@ static int process_pdta(uint32 size, SFInfo *sf, struct timidity_file *fd)
 
 static void load_sample_names(uint32 size, SFInfo *sf, struct timidity_file *fd)
 {
-	int i, nsamples;
 	if (sf->version > 1) {
 		ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
 			  "%s: *** version 2 has obsolete format??",
@@ -543,20 +542,20 @@ static void load_sample_names(uint32 size, SFInfo *sf, struct timidity_file *fd)
 	}
 
 	/* each sample name has a fixed lentgh (20 bytes) */
-	nsamples = size / 20;
+	uint32 nsamples = size / 20;
 	if (sf->sample == NULL) {
 		sf->nsamples = nsamples;
 		sf->sample = NEW(SFSampleInfo, sf->nsamples);
 	} else if (sf->nsamples != nsamples) {
 		ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
-			  "%s: *** different # of samples ?? (%d : %d)\n",
+			  "%s: *** different # of samples ?? (%u : %u)\n",
 			  current_filename, sf->nsamples, nsamples);
 		FSKIP(size, fd);
 		return;
 	}
 		
 	/* read each name from file */
-	for (i = 0; i < sf->nsamples; i++) {
+	for (uint32 i = 0; i < sf->nsamples; i++) {
 		READSTR(sf->sample[i].name, fd);
 	}
 }
@@ -682,17 +681,16 @@ static void load_mod(uint32 size, SFBags *bagp, struct timidity_file *fd)
 
 static void load_sample_info(uint32 size, SFInfo *sf, struct timidity_file *fd)
 {
-	int i;
 	int in_rom;
 
 	/* the record size depends on the soundfont version */
 	if (sf->version > 1) {
 		/* SF2 includes sample name and other infos */
-		sf->nsamples = size / 46;
+		sf->nsamples = size / 46u;
 		sf->sample = NEW(SFSampleInfo, sf->nsamples);
 	} else  {
 		/* SBK; sample name may be read already */
-		int nsamples = size / 16;
+		uint32 nsamples = size / 16u;
 		if (sf->sample == NULL) {
 			sf->nsamples = nsamples;
 			sf->sample = NEW(SFSampleInfo, sf->nsamples);
@@ -709,7 +707,7 @@ static void load_sample_info(uint32 size, SFInfo *sf, struct timidity_file *fd)
 	}
 
 	in_rom = 1;  /* data may start from ROM samples */
-	for (i = 0; i < sf->nsamples; i++) {
+	for (uint32 i = 0; i < sf->nsamples; i++) {
 		if (sf->version > 1) /* SF2 only */
 			READSTR(sf->sample[i].name, fd);
 		READDW(&sf->sample[i].startsample, fd);
@@ -843,7 +841,7 @@ static void free_layer(SFHeader *hdr)
 int auto_add_blank = 0;
 void correct_samples(SFInfo *sf)
 {
-	int i;
+	uint32 i;
 	SFSampleInfo *sp;
 	uint32 prev_end;
 
@@ -861,21 +859,26 @@ void correct_samples(SFInfo *sf)
 		else if (sp->startsample < prev_end && sp->startsample != 0)
 			sp->size = 0;
 		else {
-			sp->size = -1;
-			if (!auto_add_blank && i != sf->nsamples-1)
-				sp->size = sp[1].startsample - sp->startsample;
-			if (sp->size < 0)
-				sp->size = sp->endsample - sp->startsample + 48;
+			int64 size = -1;
+			if (!auto_add_blank && (int64)i != (int64)sf->nsamples-1)
+				size = (int64)sp[1].startsample - (int64)sp->startsample;
+			if (size < 0)
+				size = (int64)sp->endsample - (int64)sp->startsample + 48;
+			if (size < 0)
+				size = 0;
+			sp->size = (uint32)size;
 		}
 		prev_end = sp->endsample;
 
 		/* calculate short-shot loop size */
-		if (auto_add_blank || i == sf->nsamples-1)
-			sp->loopshot = 48;
+		if (auto_add_blank || i == sf->nsamples-1u)
+			sp->loopshot = 48u;
 		else {
-			sp->loopshot = sp[1].startsample - sp->endsample;
+			int64 loopshot = (int64)sp[1].startsample - (int64)sp->endsample;
 			if (sp->loopshot < 0 || sp->loopshot > 48)
-				sp->loopshot = 48;
+				loopshot = 48;
+
+			sp->loopshot = (uint8)loopshot;
 		}
 	}
 }

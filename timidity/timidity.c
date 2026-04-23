@@ -1183,21 +1183,24 @@ static char *expand_variables(char *string, MBlockList *varbuf, const char *base
 {
 	char *p, *expstr;
 	const char *copystr;
-	int limlen, copylen, explen, varlen, braced;
+	int explen, varlen, braced;
+	size_t limlen = 0;
 	
 	if ((p = strchr(string, '$')) == NULL)
 		return string;
 	varlen = strlen(basedir);
-	explen = limlen = 0;
+	explen = 0;
 	expstr = NULL;
 	copystr = string;
-	copylen = p - string;
+	if (p < string)
+		return string;
+	intptr_t copylen = p - string;
 	string = p;
 	for(;;)
 	{
 		if (explen + copylen + 1 > limlen)
 		{
-			limlen += copylen + 128;
+			limlen += copylen + 128u;
 			expstr = memcpy(new_segment(varbuf, limlen), expstr, explen);
 		}
 		memcpy(&expstr[explen], copystr, copylen);

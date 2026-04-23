@@ -303,10 +303,10 @@ static int16 get_midi_controller_pitch_depth(midi_controller *);
 static int16 get_midi_controller_amp_depth(midi_controller *);
 /* Rx. ~ (Rcv ~) */
 static void init_rx(int);
-static void set_rx(int, int32, int);
+static void set_rx(int, uint32, int);
 static void init_rx_drum(struct DrumParts *);
-static void set_rx_drum(struct DrumParts *, int32, int);
-static int32 get_rx_drum(struct DrumParts *, int32);
+static void set_rx_drum(struct DrumParts *, uint32, int);
+static uint32 get_rx_drum(struct DrumParts *, uint32);
 
 #define IS_SYSEX_EVENT_TYPE(event) ((event)->type == ME_NONE || (event)->type >= ME_RANDOM_PAN || (event)->b == SYSEX_TAG)
 
@@ -428,30 +428,35 @@ static void adjust_amplification(void)
 
 static int new_vidq(int ch, int note)
 {
-    int i;
+    size_t i;
 
     if(opt_overlap_voice_allow)
     {
-	i = ch * 128 + note;
-	return vidq_head[i]++;
+		i = ch * 128u + note;
+		
+		uint8 old = vidq_head[i];
+		vidq_head[i] = (uint8)(old + 1u);
+		return old;
     }
     return 0;
 }
 
 static int last_vidq(int ch, int note)
 {
-    int i;
+    size_t i;
 
     if(opt_overlap_voice_allow)
     {
-	i = ch * 128 + note;
-	if(vidq_head[i] == vidq_tail[i])
-	{
-	    ctl->cmsg(CMSG_WARNING, VERB_DEBUG_SILLY,
-		      "channel=%d, note=%d: Voice is already OFF", ch, note);
-	    return -1;
-	}
-	return vidq_tail[i]++;
+		i = ch * 128 + note;
+		if(vidq_head[i] == vidq_tail[i])
+		{
+			ctl->cmsg(CMSG_WARNING, VERB_DEBUG_SILLY,
+				"channel=%d, note=%d: Voice is already OFF", ch, note);
+			return -1;
+		}
+		uint8 old = vidq_tail[i];
+		vidq_tail[i] = (uint8)(old + 1u);
+		return old;
     }
     return 0;
 }
@@ -1248,7 +1253,7 @@ void recompute_voice_filter(int v)
 		if(voice[v].sample->tremolo_to_fc || depth_cent != 0) {
 			cent += ((double)voice[v].sample->tremolo_to_fc + depth_cent) * lookup_triangular(voice[v].tremolo_phase >> RATE_SHIFT);
 		}
-		if (sp->modenv_to_fc || sp->vel_to_modenv_to_fc && voice[v].velocity || sp->vel_to_modenv_to_fc_cc) {
+		if (sp->modenv_to_fc || (sp->vel_to_modenv_to_fc && voice[v].velocity) || sp->vel_to_modenv_to_fc_cc) {
 			/* Total modenv→filterFc = generator amount + velocity modulators.
 			 * Linear: vel/127 * amount (positive unipolar).
 			 * Concave: (1 - sf2_vel_cb_table[vel]/960) * amount (positive unipolar). */
@@ -1960,8 +1965,8 @@ static int find_samples(MidiEvent *e, int *vlist)
 			if (! (ip = play_midi_load_instrument(0, bank, prog)))
 				return 0;	/* No instrument? Then we can't play. */
 		}
-		note = ((ip->sample->note_to_use) ? ip->sample->note_to_use : e->a)
-				+ channel[ch].key_shift + note_key_offset;
+		note = (int)((ip->sample->note_to_use) ? ip->sample->note_to_use : e->a)
+				+ (int)channel[ch].key_shift + note_key_offset;
 		note = (note < 0) ? 0 : ((note > 127) ? 127 : note);
 	}
 	nv = select_play_sample(ip->sample, ip->samples, &note, vlist, e,
@@ -2175,7 +2180,7 @@ static double get_play_note_ratio(int ch, int note)
 static int find_voice(MidiEvent *e)
 {
 	int ch = e->channel;
-	int note = MIDI_EVENT_NOTE(e);
+	uint8 note = MIDI_EVENT_NOTE(e);
 	int status_check, mono_check;
 	AlternateAssign *altassign;
 	int i, lowest = -1;
@@ -3346,8 +3351,6 @@ static void make_drum_effect(int ch)
 	int8 note_table[128];
 	struct DrumParts *drum;
 	struct DrumPartEffect *de;
-
-	if (channel[ch].drums == NULL) {return;}
 
 	if (channel[ch].drum_effect_flag == 0) {
 		free_drum_effect(ch);
@@ -9008,10 +9011,10 @@ static int16 get_midi_controller_amp_depth(midi_controller *p)
 
 static void init_rx(int ch)
 {
-	channel[ch].rx = 0xFFFFFFFF;	/* all on */
+	channel[ch].rx = 0xFFFFFFFFu;	/* all on */
 }
 
-static void set_rx(int ch, int32 rx, int flag)
+static void set_rx(int ch, uint32 rx, int flag)
 {
 	if(ch > MAX_CHANNELS) {return;}
 	if(flag) {channel[ch].rx |= rx;}
@@ -9019,7 +9022,7 @@ static void set_rx(int ch, int32 rx, int flag)
 }
 
 #if 0
-static int32 get_rx(int ch, int32 rx)
+static int32 get_rx(int ch, uint32 rx)
 {
 	return (channel[ch].rx & rx);
 }
@@ -9027,16 +9030,16 @@ static int32 get_rx(int ch, int32 rx)
 
 static void init_rx_drum(struct DrumParts *p)
 {
-	p->rx = 0xFFFFFFFF;	/* all on */
+	p->rx = 0xFFFFFFFFu;	/* all on */
 }
 
-static void set_rx_drum(struct DrumParts *p, int32 rx, int flag)
+static void set_rx_drum(struct DrumParts *p, uint32 rx, int flag)
 {
 	if(flag) {p->rx |= rx;}
 	else {p->rx &= ~rx;}
 }
 
-static int32 get_rx_drum(struct DrumParts *p, int32 rx)
+static uint32 get_rx_drum(struct DrumParts *p, uint32 rx)
 {
 	return (p->rx & rx);
 }
@@ -9044,13 +9047,13 @@ static int32 get_rx_drum(struct DrumParts *p, int32 rx)
 void pregrow_playmidi_pool(void)
 {
 	pregrow_mblock(&playmidi_pool,
-		       128 * ((sizeof(struct DrumParts) + 7) & ~7));
+		       128u * ((sizeof(struct DrumParts) + 7u) & ~(size_t)7));
 }
 
 void init_reverb_buffer(void)
 {
 	if (reverb_buffer == NULL)
-		reverb_buffer = (char *)safe_malloc(MAX_CHANNELS * AUDIO_BUFFER_SIZE * 8);
+		reverb_buffer = (char *)safe_malloc(MAX_CHANNELS * AUDIO_BUFFER_SIZE * 8u);
 }
 
 void free_reverb_buffer(void)

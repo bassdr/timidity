@@ -99,17 +99,6 @@ struct midi_ringbuf {
 	int wrptr;
 };
 
-static inline int midibuf_available(struct midi_ringbuf *rb)
-{
-	return __atomic_load_n(&rb->wrptr, __ATOMIC_ACQUIRE)
-	     - __atomic_load_n(&rb->rdptr, __ATOMIC_RELAXED);
-}
-
-static inline int midibuf_empty(struct midi_ringbuf *rb)
-{
-	return MIDI_BUF_SIZE - midibuf_available(rb);
-}
-
 /*
  * Push a MIDI message onto the ring buffer (RT thread / producer).
  * Uses a release store on wrptr so the consumer sees the completed
@@ -1011,17 +1000,13 @@ static void doit(void)
 		 */
 		if (pwctx.file_output && pwctx.active) {
 			struct timespec now;
-			double elapsed, audio_time, ahead;
 			clock_gettime(CLOCK_MONOTONIC, &now);
-			elapsed = (now.tv_sec - pwctx.start_ts.tv_sec)
-				+ (now.tv_nsec - pwctx.start_ts.tv_nsec)
-				  * 1e-9;
-			audio_time = (double)pwctx.buffer_time_offset
-				     / play_mode->rate;
-			ahead = audio_time - elapsed;
-			if (ahead > 0.0001) {
-				long us = (long)(ahead * 1e6);
-				usleep(us > 50000 ? 50000 : us);
+			int64 elapsed_us = ((int64)now.tv_sec - (int64)pwctx.start_ts.tv_sec) * 1000000LL + 
+				((int64)now.tv_nsec - (int64)pwctx.start_ts.tv_nsec) / 1000LL;
+			int64 audio_us = (int64)pwctx.buffer_time_offset * 1000000LL / play_mode->rate;
+			int64 ahead_us = audio_us - elapsed_us;
+			if (ahead_us > 100) {
+				usleep(ahead_us > 50000 ? 50000 : (int)ahead_us);
 			}
 		} else if (pwctx.active) {
 			/*
@@ -1036,9 +1021,8 @@ static void doit(void)
 			 * file outputs accessed via -ip -Of).
 			 */
 			if (play_mode->acntl(PM_REQ_OUTPUT_READY, NULL) < 0) {
-				int us = pwctx.buffer_time_advance * 500000
-					 / play_mode->rate;
-				usleep(us > 500 ? 500 : (us > 0 ? us : 100));
+				int64 us = (int64)pwctx.buffer_time_advance * 500000LL / play_mode->rate;
+				usleep(us > 500 ? 500 : (us > 0 ? (int)us : 100));
 			}
 		} else {
 			usleep(10000);

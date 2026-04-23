@@ -282,7 +282,6 @@ char *readmidi_make_string_event(int type, char *string, MidiEvent *ev,
 				 int cnv)
 {
     char *text;
-    int len;
     StringTableNode *st;
     int a, b;
 
@@ -296,10 +295,10 @@ char *readmidi_make_string_event(int type, char *string, MidiEvent *ev,
     a = (string_event_strtab.nstring & 0xff);
     b = ((string_event_strtab.nstring >> 8) & 0xff);
 
-    len = strlen(string);
+    size_t len = strlen(string);
     if(cnv)
     {
-	text = (char *)new_segment(&tmpbuffer, SAFE_CONVERT_LENGTH(len) + 1);
+	text = (char *)new_segment(&tmpbuffer, SAFE_CONVERT_LENGTH(len) + 1u);
 	code_convert(string, text + 1, SAFE_CONVERT_LENGTH(len), NULL, NULL);
     }
     else
@@ -445,26 +444,25 @@ static char *add_karaoke_title(char *s1, char *s2)
 
 /* Print a string from the file, followed by a newline. Any non-ASCII
    or unprintable characters will be converted to periods. */
-static char *dumpstring(int type, int32 len, char *label, int allocp,
+static char *dumpstring(int type, int64 len, char *label, int allocp,
 			struct timidity_file *tf)
 {
     char *si, *so;
-    int s_maxlen = SAFE_CONVERT_LENGTH(len);
-    int llen, solen;
-
+    
     if(len <= 0)
     {
-	ctl->cmsg(CMSG_TEXT, VERB_VERBOSE, "%s", label);
-	return NULL;
+		ctl->cmsg(CMSG_TEXT, VERB_VERBOSE, "%s", label);
+		return NULL;
     }
 
-    si = (char *)new_segment(&tmpbuffer, len + 1);
+	size_t s_maxlen = SAFE_CONVERT_LENGTH(len);
+    si = (char *)new_segment(&tmpbuffer, (size_t)len + 1u);
     so = (char *)new_segment(&tmpbuffer, s_maxlen);
 
     if(len != tf_read(si, 1, len, tf))
     {
-	reuse_mblock(&tmpbuffer);
-	return NULL;
+		reuse_mblock(&tmpbuffer);
+		return NULL;
     }
     si[len]='\0';
 
@@ -476,8 +474,8 @@ static char *dumpstring(int type, int32 len, char *label, int allocp,
 
     code_convert(si, so, s_maxlen, NULL, NULL);
 
-    llen = strlen(label);
-    solen = strlen(so);
+    size_t llen = strlen(label);
+    size_t solen = strlen(so);
     if(llen + solen >= MIN_MBLOCK_SIZE)
 	so[MIN_MBLOCK_SIZE - llen - 1] = '\0';
 
@@ -485,9 +483,9 @@ static char *dumpstring(int type, int32 len, char *label, int allocp,
 
     if(allocp)
     {
-	so = safe_strdup(so);
-	reuse_mblock(&tmpbuffer);
-	return so;
+		so = safe_strdup(so);
+		reuse_mblock(&tmpbuffer);
+		return so;
     }
     reuse_mblock(&tmpbuffer);
     return NULL;
@@ -3262,30 +3260,31 @@ static int read_sysex_event(int32 at, int me, int32 len,
     int ne, i;
 
     if(len == 0)
-	return 0;
+		return 0;
+
     if(me != 0xF0)
     {
-	skip(tf, len);
-	return 0;
+		skip(tf, len);
+		return 0;
     }
 
     val = (uint8 *)new_segment(&tmpbuffer, len);
     if(tf_read(val, 1, len, tf) != len)
     {
-	reuse_mblock(&tmpbuffer);
-	return -1;
+		reuse_mblock(&tmpbuffer);
+		return -1;
     }
     if(parse_sysex_event(val, len, &ev))
     {
-	ev.time = at;
-	readmidi_add_event(&ev);
+		ev.time = at;
+		readmidi_add_event(&ev);
     }
     if ((ne = parse_sysex_event_multi(val, len, evm)))
     {
-	for (i = 0; i < ne; i++) {
-	    evm[i].time = at;
-	    readmidi_add_event(&evm[i]);
-	}
+		for (i = 0; i < ne; i++) {
+			evm[i].time = at;
+			readmidi_add_event(&evm[i]);
+		}
     }
     
     reuse_mblock(&tmpbuffer);
@@ -3299,23 +3298,24 @@ static char *fix_string(char *s)
     char c;
 
     if(s == NULL)
-	return NULL;
+		return NULL;
+
     while(*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n')
-	s++;
+		s++;
 
     /* s =~ tr/ \t\r\n/ /s; */
     w = 0;
     for(i = j = 0; (c = s[i]) != '\0'; i++)
     {
-	if(c == '\t' || c == '\r' || c == '\n')
-	    c = ' ';
-	if(w)
-	    w = (c == ' ');
-	if(!w)
-	{
-	    s[j++] = c;
-	    w = (c == ' ');
-	}
+		if(c == '\t' || c == '\r' || c == '\n')
+			c = ' ';
+		if(w)
+			w = (c == ' ');
+		if(!w)
+		{
+			s[j++] = c;
+			w = (c == ' ');
+		}
     }
 
     /* s =~ s/ $//; */
@@ -3463,9 +3463,9 @@ static int read_smf_track(struct timidity_file *tf, int trackno, int rewindp)
     next_pos = tf_tell(tf) + len;
     if(strncmp(tmp, "MTrk", 4))
     {
-	ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
-		  "%s: Corrupt MIDI file.", current_filename);
-	return -2;
+		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+			"%s: Corrupt MIDI file.", current_filename);
+		return -2;
     }
 
     lastchan = laststatus = 0;
@@ -3503,7 +3503,7 @@ static int read_smf_track(struct timidity_file *tf, int trackno, int rewindp)
 	{
 	    type = tf_getc(tf);
 	    if((len = getvl(tf)) < 0)
-		return -1;
+			return -1;
 	    if(type > 0 && type < 16)
 	    {
 		static char *label[] =
@@ -3523,7 +3523,7 @@ static int read_smf_track(struct timidity_file *tf, int trackno, int rewindp)
 		    char *str, *text;
 		    MidiEvent ev;
 
-		    str = (char *)new_segment(&tmpbuffer, len + 3);
+		    str = (char *)new_segment(&tmpbuffer, (size_t)len + 3u);
 		    if(type != 6)
 		    {
 			i = tf_read(str, 1, len, tf);
@@ -5200,25 +5200,24 @@ char *get_midi_title(char *filename)
     struct midi_file_info *p;
     struct timidity_file *tf;
     char tmp[4];
-    int32 len;
     int16 format, tracks, trk;
     int laststatus, check_cache;
     int mtype;
 
     if(filename == NULL)
     {
-	if(current_file_info == NULL)
-	    return NULL;
-	filename = current_file_info->filename;
+		if(current_file_info == NULL)
+			return NULL;
+		filename = current_file_info->filename;
     }
 
     p = get_midi_file_info(filename, 0);
     if(p == NULL)
-	p = get_midi_file_info(filename, 1);
+		p = get_midi_file_info(filename, 1);
     else 
     {
-	if(p->seq_name != NULL || p->first_text != NULL || p->format < 0)
-	    return get_midi_title1(p);
+		if(p->seq_name != NULL || p->first_text != NULL || p->format < 0)
+			return get_midi_title1(p);
     }
 
     tf = open_file(filename, 1, OF_SILENT);
@@ -5229,323 +5228,322 @@ char *get_midi_title(char *filename)
     check_cache = check_need_cache(tf->url, filename);
     if(check_cache || mtype > 0)
     {
-	if(!IS_URL_SEEK_SAFE(tf->url))
-	{
-	    if((tf->url = url_cache_open(tf->url, 1)) == NULL)
-	    {
-		close_file(tf);
-		return NULL;
-	    }
-	}
+		if(!IS_URL_SEEK_SAFE(tf->url))
+		{
+			if((tf->url = url_cache_open(tf->url, 1)) == NULL)
+			{
+			close_file(tf);
+			return NULL;
+			}
+		}
     }
 
     if(mtype > 0)
     {
-	char *title, *str;
+		char *title, *str;
 
-	title = get_module_title(tf, mtype);
-	if(title == NULL)
-	{
-	    /* No title */
-	    p->seq_name = NULL;
-	    p->format = 0;
-	    goto end_of_parse;
-	}
+		title = get_module_title(tf, mtype);
+		if(title == NULL)
+		{
+			/* No title */
+			p->seq_name = NULL;
+			p->format = 0;
+			goto end_of_parse;
+		}
 
-	len = (int32)strlen(title);
-	len = SAFE_CONVERT_LENGTH(len);
-	str = (char *)new_segment(&tmpbuffer, len);
-	code_convert(title, str, len, NULL, NULL);
-	p->seq_name = (char *)safe_strdup(str);
-	reuse_mblock(&tmpbuffer);
-	p->format = 0;
-	free (title);
-	goto end_of_parse;
+		size_t len = strlen(title);
+		len = SAFE_CONVERT_LENGTH(len);
+		str = (char *)new_segment(&tmpbuffer, len);
+		code_convert(title, str, len, NULL, NULL);
+		p->seq_name = (char *)safe_strdup(str);
+		reuse_mblock(&tmpbuffer);
+		p->format = 0;
+		free (title);
+		goto end_of_parse;
     }
 
     /* Parse MIDI header */
     if(tf_read(tmp, 1, 4, tf) != 4)
     {
-	close_file(tf);
-	return NULL;
+		close_file(tf);
+		return NULL;
     }
 
     if(tmp[0] == 0)
     {
-	skip(tf, 128 - 4);
-	if(tf_read(tmp, 1, 4, tf) != 4)
-	{
-	    close_file(tf);
-	    return NULL;
-	}
+		skip(tf, 128 - 4);
+		if(tf_read(tmp, 1, 4, tf) != 4)
+		{
+			close_file(tf);
+			return NULL;
+		}
     }
 
     if(memcmp(tmp, "RCM-", 4) == 0 || memcmp(tmp, "COME", 4) == 0)
     {
-	int i;
-	char local[0x40 + 1];
-	char *str;
+		int8 i;
+		char local[0x40u + 1u];
+		char *str;
 
-	p->format = 1;
-	skip(tf, 0x20 - 4);
-	tf_read(local, 1, 0x40, tf);
-	local[0x40]='\0';
+		p->format = 1;
+		skip(tf, 0x20 - 4);
+		tf_read(local, 1, 0x40, tf);
+		local[0x40]='\0';
 
-	for(i = 0x40 - 1; i >= 0; i--)
-	{
-	    if(local[i] == 0x20)
-		local[i] = '\0';
-	    else if(local[i] != '\0')
-		break;
-	}
+		for(i = 0x40u - 1u; i >= 0u; i--)
+		{
+			if(local[i] == 0x20)
+				local[i] = '\0';
+			else if(local[i] != '\0')
+				break;
+		}
 
-	i = SAFE_CONVERT_LENGTH(i + 1);
-	str = (char *)new_segment(&tmpbuffer, i);
-	code_convert(local, str, i, NULL, NULL);
-	p->seq_name = (char *)safe_strdup(str);
-	reuse_mblock(&tmpbuffer);
-	p->format = 1;
-	goto end_of_parse;
+		i = SAFE_CONVERT_LENGTH(i + 1u);
+		str = (char *)new_segment(&tmpbuffer, (size_t)i);
+		code_convert(local, str, i, NULL, NULL);
+		p->seq_name = (char *)safe_strdup(str);
+		reuse_mblock(&tmpbuffer);
+		p->format = 1;
+		goto end_of_parse;
     }
     if(memcmp(tmp, "melo", 4) == 0)
-    {
-	int i;
-	char *master, *converted;
-	
-	master = get_mfi_file_title(tf);
-	if (master != NULL)
 	{
-	    i = SAFE_CONVERT_LENGTH(strlen(master) + 1);
-	    converted = (char *)new_segment(&tmpbuffer, i);
-	    code_convert(master, converted, i, NULL, NULL);
-	    p->seq_name = (char *)safe_strdup(converted);
-	    reuse_mblock(&tmpbuffer);
+		char *master, *converted;
+		
+		master = get_mfi_file_title(tf);
+		if (master != NULL)
+		{
+			size_t i = SAFE_CONVERT_LENGTH(strlen(master) + 1u);
+			converted = (char *)new_segment(&tmpbuffer, i);
+			code_convert(master, converted, i, NULL, NULL);
+			p->seq_name = (char *)safe_strdup(converted);
+			reuse_mblock(&tmpbuffer);
+		}
+		else
+		{
+			p->seq_name = (char *)safe_malloc(1);
+			p->seq_name[0] = '\0';
+		}
+		p->format = 0;
+		goto end_of_parse;
 	}
-	else
+
+	if(strncmp(tmp, "M1", 2) == 0)
 	{
-	    p->seq_name = (char *)safe_malloc(1);
-	    p->seq_name[0] = '\0';
+		/* I don't know MPC file format */
+		p->format = 1;
+		goto end_of_parse;
 	}
-	p->format = 0;
-	goto end_of_parse;
-    }
 
-    if(strncmp(tmp, "M1", 2) == 0)
-    {
-	/* I don't know MPC file format */
-	p->format = 1;
-	goto end_of_parse;
-    }
+	if(strncmp(tmp, "RIFF", 4) == 0)
+	{
+		/* RIFF MIDI file */
+		skip(tf, 20 - 4);
+		if(tf_read(tmp, 1, 4, tf) != 4)
+		{
+			close_file(tf);
+			return NULL;
+		}
+	}
 
-	  if(strncmp(tmp, "RIFF", 4) == 0)
-	  {
-	/* RIFF MIDI file */
-	skip(tf, 20 - 4);
-  if(tf_read(tmp, 1, 4, tf) != 4)
-    {
-	close_file(tf);
-	return NULL;
-    }
-	  }
+	if(strncmp(tmp, "MThd", 4) != 0)
+	{
+		close_file(tf);
+		return NULL;
+	}
 
-    if(strncmp(tmp, "MThd", 4) != 0)
-    {
-	close_file(tf);
-	return NULL;
-    }
+	int32 len;
+	if(tf_read(&len, 4, 1, tf) != 1)
+	{
+		close_file(tf);
+		return NULL;
+	}
 
-    if(tf_read(&len, 4, 1, tf) != 1)
-    {
-	close_file(tf);
-	return NULL;
-    }
+	len = BE_LONG(len);
 
-    len = BE_LONG(len);
-
-    tf_read(&format, 2, 1, tf);
-    tf_read(&tracks, 2, 1, tf);
-    format = BE_SHORT(format);
-    tracks = BE_SHORT(tracks);
-    p->format = format;
-    p->tracks = tracks;
-    if(format < 0 || format > 2)
-    {
+	tf_read(&format, 2, 1, tf);
+	tf_read(&tracks, 2, 1, tf);
+	format = BE_SHORT(format);
+	tracks = BE_SHORT(tracks);
+	p->format = format;
+	p->tracks = tracks;
+	if(format < 0 || format > 2)
+	{
 	p->format = -1;
 	close_file(tf);
 	return NULL;
-    }
+	}
 
-    skip(tf, len - 4);
-    p->hdrsiz = (int16)tf_tell(tf);
+	skip(tf, len - 4);
+	p->hdrsiz = (int16)tf_tell(tf);
 
-    if(format == 2)
-	goto end_of_parse;
-
-    if(tracks >= 3)
-    {
-	tracks = 3;
-	karaoke_format = 0;
-    }
-    else
-    {
-	tracks = 1;
-	karaoke_format = -1;
-    }
-
-    for(trk = 0; trk < tracks; trk++)
-    {
-	int32 next_pos, pos;
-
-	if(trk >= 1 && karaoke_format == -1)
-	    break;
-
-	if((tf_read(tmp,1,4,tf) != 4) || (tf_read(&len,4,1,tf) != 1))
-	    break;
-
-	if(memcmp(tmp, "MTrk", 4))
-	    break;
-
-	next_pos = tf_tell(tf) + len;
-	laststatus = -1;
-	for(;;)
-	{
-	    int i, me, type;
-
-	    /* skip Variable-length quantity */
-	    do
-	    {
-		if((i = tf_getc(tf)) == EOF)
-		    goto end_of_parse;
-	    } while (i & 0x80);
-
-	    if((me = tf_getc(tf)) == EOF)
+	if(format == 2)
 		goto end_of_parse;
 
-	    if(me == 0xF0 || me == 0xF7) /* SysEx */
-	    {
-		if((len = getvl(tf)) < 0)
-		    goto end_of_parse;
-		if((p->mid == 0 || p->mid >= 0x7e) && len > 0 && me == 0xF0)
-		{
-		    p->mid = tf_getc(tf);
-		    len--;
-		}
-		skip(tf, len);
-	    }
-	    else if(me == 0xFF) /* Meta */
-	    {
-		type = tf_getc(tf);
-		if((len = getvl(tf)) < 0)
-		    goto end_of_parse;
-		if((type == 1 || type == 3) && len > 0 &&
-		   (trk == 0 || karaoke_format != -1))
-		{
-		    char *si, *so;
-		    int s_maxlen = SAFE_CONVERT_LENGTH(len);
-
-		    si = (char *)new_segment(&tmpbuffer, len + 1);
-		    so = (char *)new_segment(&tmpbuffer, s_maxlen);
-
-		    if(len != tf_read(si, 1, len, tf))
-		    {
-			reuse_mblock(&tmpbuffer);
-			goto end_of_parse;
-		    }
-
-		    si[len]='\0';
-		    code_convert(si, so, s_maxlen, NULL, NULL);
-		    if(trk == 0 && type == 3)
-		    {
-		      if(p->seq_name == NULL) {
-			char *name = safe_strdup(so);
-			p->seq_name = safe_strdup(fix_string(name));
-			free(name);
-		      }
-		      reuse_mblock(&tmpbuffer);
-		      if(karaoke_format == -1)
-			goto end_of_parse;
-		    }
-		    if(p->first_text == NULL) {
-		      char *name;
-		      name = safe_strdup(so);
-		      p->first_text = safe_strdup(fix_string(name));
-		      free(name);
-		    }
-		    if(karaoke_format != -1)
-		    {
-			if(trk == 1 && strncmp(si, "@K", 2) == 0)
-			    karaoke_format = 1;
-			else if(karaoke_format == 1 && trk == 2)
-			    karaoke_format = 2;
-		    }
-		    if(type == 1 && karaoke_format == 2)
-		    {
-			if(strncmp(si, "@T", 2) == 0)
-			    p->karaoke_title =
-				add_karaoke_title(p->karaoke_title, si + 2);
-			else if(si[0] == '\\')
-			    goto end_of_parse;
-		    }
-		    reuse_mblock(&tmpbuffer);
-		}
-		else if(type == 0x2F)
-		{
-		    pos = tf_tell(tf);
-		    if(pos < next_pos)
-			tf_seek(tf, next_pos - pos, SEEK_CUR);
-		    break; /* End of track */
-		}
-		else
-		    skip(tf, len);
-	    }
-	    else /* MIDI event */
-	    {
-		/* skip MIDI event */
-		karaoke_format = -1;
-		if(trk != 0)
-		    goto end_of_parse;
-
-		if(me & 0x80) /* status byte */
-		{
-		    laststatus = (me >> 4) & 0x07;
-		    if(laststatus != 7)
-			tf_getc(tf);
-		}
-
-		switch(laststatus)
-		{
-		  case 0: case 1: case 2: case 3: case 6:
-		    tf_getc(tf);
-		    break;
-		  case 7:
-		    if(!(me & 0x80))
-			break;
-		    switch(me & 0x0F)
-		    {
-		      case 2:
-			tf_getc(tf);
-			tf_getc(tf);
-			break;
-		      case 3:
-			tf_getc(tf);
-			break;
-		    }
-		    break;
-		}
-	    }
+	if(tracks >= 3)
+	{
+		tracks = 3;
+		karaoke_format = 0;
 	}
-    }
+	else
+	{
+		tracks = 1;
+		karaoke_format = -1;
+	}
 
-  end_of_parse:
+	for(trk = 0; trk < tracks; trk++)
+	{
+		int32 next_pos, pos;
+
+		if(trk >= 1 && karaoke_format == -1)
+			break;
+
+		if((tf_read(tmp,1,4,tf) != 4) || (tf_read(&len,4,1,tf) != 1))
+			break;
+
+		if(memcmp(tmp, "MTrk", 4))
+			break;
+
+		next_pos = tf_tell(tf) + len;
+		laststatus = -1;
+		for(;;)
+		{
+			int i, me, type;
+
+			/* skip Variable-length quantity */
+			do
+			{
+				if((i = tf_getc(tf)) == EOF)
+					goto end_of_parse;
+			} while (i & 0x80);
+
+			if((me = tf_getc(tf)) == EOF)
+				goto end_of_parse;
+
+			if(me == 0xF0 || me == 0xF7) /* SysEx */
+			{
+				if((len = getvl(tf)) < 0)
+					goto end_of_parse;
+				if((p->mid == 0 || p->mid >= 0x7e) && len > 0 && me == 0xF0)
+				{
+					p->mid = tf_getc(tf);
+					len--;
+				}
+				skip(tf, len);
+			}
+			else if(me == 0xFF) /* Meta */
+			{
+				type = tf_getc(tf);
+				if((len = getvl(tf)) < 0)
+					goto end_of_parse;
+				if((type == 1 || type == 3) && len > 0 &&
+					(trk == 0 || karaoke_format != -1))
+				{
+					char *si, *so;
+					size_t s_maxlen = SAFE_CONVERT_LENGTH(len);
+
+					si = (char *)new_segment(&tmpbuffer, len + 1u);
+					so = (char *)new_segment(&tmpbuffer, s_maxlen);
+
+					if(len != tf_read(si, 1, len, tf))
+					{
+						reuse_mblock(&tmpbuffer);
+						goto end_of_parse;
+					}
+
+					si[len]='\0';
+					code_convert(si, so, s_maxlen, NULL, NULL);
+					if(trk == 0 && type == 3)
+					{
+						if(p->seq_name == NULL) {
+							char *name = safe_strdup(so);
+							p->seq_name = safe_strdup(fix_string(name));
+							free(name);
+						}
+						reuse_mblock(&tmpbuffer);
+						if(karaoke_format == -1)
+							goto end_of_parse;
+					}
+					if(p->first_text == NULL) {
+						char *name;
+						name = safe_strdup(so);
+						p->first_text = safe_strdup(fix_string(name));
+						free(name);
+					}
+					if(karaoke_format != -1)
+					{
+						if(trk == 1 && strncmp(si, "@K", 2) == 0)
+							karaoke_format = 1;
+						else if(karaoke_format == 1 && trk == 2)
+							karaoke_format = 2;
+					}
+					if(type == 1 && karaoke_format == 2)
+					{
+						if(strncmp(si, "@T", 2) == 0)
+							p->karaoke_title = add_karaoke_title(p->karaoke_title, si + 2);
+						else if(si[0] == '\\')
+							goto end_of_parse;
+					}
+					reuse_mblock(&tmpbuffer);
+				}
+				else if(type == 0x2F)
+				{
+					pos = tf_tell(tf);
+					if(pos < next_pos)
+						tf_seek(tf, next_pos - pos, SEEK_CUR);
+					break; /* End of track */
+				}
+				else
+					skip(tf, len);
+			}
+			else /* MIDI event */
+			{
+				/* skip MIDI event */
+				karaoke_format = -1;
+				if(trk != 0)
+					goto end_of_parse;
+
+				if(me & 0x80) /* status byte */
+				{
+					laststatus = (me >> 4) & 0x07;
+					if(laststatus != 7)
+					tf_getc(tf);
+				}
+
+				switch(laststatus)
+				{
+				case 0: case 1: case 2: case 3: case 6:
+					tf_getc(tf);
+					break;
+				case 7:
+					if(!(me & 0x80))
+					break;
+					switch(me & 0x0F)
+					{
+					case 2:
+					tf_getc(tf);
+					tf_getc(tf);
+					break;
+					case 3:
+					tf_getc(tf);
+					break;
+					}
+					break;
+				}
+			}
+		}
+	}
+
+end_of_parse:
     if(check_cache)
     {
-	url_rewind(tf->url);
-	url_cache_disable(tf->url);
-	url_make_file_data(tf->url, p);
+		url_rewind(tf->url);
+		url_cache_disable(tf->url);
+		url_make_file_data(tf->url, p);
     }
     close_file(tf);
     if(p->first_text == NULL)
-	p->first_text = safe_strdup("");
+		p->first_text = safe_strdup("");
     return get_midi_title1(p);
 }
 

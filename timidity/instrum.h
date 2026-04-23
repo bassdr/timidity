@@ -236,7 +236,7 @@ extern void set_instrument_map(int mapID,
 extern void free_instrument_map(void);
 extern AlternateAssign *add_altassign_string(AlternateAssign *old,
 					     char **params, int n);
-extern AlternateAssign *find_altassign(AlternateAssign *altassign, int note);
+extern AlternateAssign *find_altassign(AlternateAssign *altassign, uint8 note);
 extern void copy_tone_bank_element(ToneBankElement *elm, const ToneBankElement *src);
 extern void free_tone_bank_element(ToneBankElement *elm);
 extern void free_tone_bank(void);

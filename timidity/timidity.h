@@ -199,7 +199,7 @@ typedef double FLOAT_T;
    a sample is 1048576 samples (2 megabytes in memory). The GUS gets
    by with just 9 bits and a little help from its friends...
    "The GUS does not SUCK!!!" -- a happy user :) */
-#define FRACTION_BITS 12
+#define FRACTION_BITS 12u
 
 
 /* For some reason the sample volume is always set to maximum in all
@@ -396,23 +396,23 @@ typedef double FLOAT_T;
  */
 
 /* change FRACTION_BITS above, not these */
-#define INTEGER_BITS (32 - FRACTION_BITS)
-#define INTEGER_MASK (0xFFFFFFFF << FRACTION_BITS)
-#define FRACTION_MASK (~ INTEGER_MASK)
+#define INTEGER_BITS (32u - FRACTION_BITS)
+#define INTEGER_MASK (splen_t)(0xFFFFFFFFllu << FRACTION_BITS)
+#define FRACTION_MASK (splen_t)(~ INTEGER_MASK)
 
 /* This is enforced by some computations that must fit in an int */
 #define MAX_CONTROL_RATIO 255
 
 /* Audio buffer size has to be a power of two to allow DMA buffer
    fragments under the VoxWare (Linux & FreeBSD) audio driver */
-#define AUDIO_BUFFER_SIZE (1<<AUDIO_BUFFER_BITS)
+#define AUDIO_BUFFER_SIZE (size_t)(1u<<AUDIO_BUFFER_BITS)
 
 /* These affect general volume */
 #define GUARD_BITS 4
 #define AMP_BITS (15-GUARD_BITS)
 
 #define MAX_AMPLIFICATION 800
-#define MAX_CHANNELS 32
+#define MAX_CHANNELS 32u
 /*#define MAX_CHANNELS 256*/
 #define MAXMIDIPORT 16
 

@@ -54,7 +54,7 @@ typedef struct _SFChunk {
 
 /* generator record */
 typedef struct _SFGenRec {
-	int16 oper;
+	uint8 oper;
 	int16 amount;
 } SFGenRec;
 
@@ -128,8 +128,8 @@ typedef struct _SFSampleInfo {
 	uint16 samplelink;
 	uint16 sampletype;  /*1=mono, 2=right, 4=left, 8=linked, $8000=ROM*/
 	/* optional info */
-	int32 size; /* sample size */
-	int32 loopshot; /* short-shot loop size */
+	uint32 size; /* sample size */
+	uint8 loopshot; /* short-shot loop size */
 } SFSampleInfo;
 
 
@@ -156,7 +156,7 @@ typedef struct _SFInfo {
 	SFPresetHdr *preset;
 	
 	/* sample infos */
-	int nsamples;
+	uint32 nsamples;
 	SFSampleInfo *sample;
 
 	/* instrument headers */

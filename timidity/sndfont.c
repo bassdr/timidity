@@ -99,7 +99,7 @@ typedef struct _SFPatchRec {
 typedef struct _SampleList {
 	Sample v;
 	struct _SampleList *next;
-	long start; /* file offset */
+	int64 start; /* file offset */
 	uint32 len;
 	int32 cutoff_freq;
 	int16 resonance;
@@ -198,8 +198,8 @@ static int parse_layer(SFInfo *sf, int pridx, LayerTable *tbl, int level,
 		       SFMods *mods);
 static int is_global(SFGenLayer *layer);
 static void clear_table(LayerTable *tbl);
-static void set_to_table(SFInfo *sf, LayerTable *tbl, SFGenLayer *lay, int level);
-static void add_item_to_table(LayerTable *tbl, int oper, int amount, int level);
+static void set_to_table(SFInfo *sf, LayerTable *tbl, SFGenLayer *lay, int8 level);
+static void add_item_to_table(LayerTable *tbl, uint8 oper, int16 amount);
 static void merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src);
 static void init_and_merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src);
 static int sanity_range(LayerTable *tbl);
@@ -959,7 +959,7 @@ static void clear_table(LayerTable *tbl)
 }
 
 /* set items in a layer to the table */
-static void set_to_table(SFInfo *sf, LayerTable *tbl, SFGenLayer *lay, int level)
+static void set_to_table(SFInfo *sf, LayerTable *tbl, SFGenLayer *lay, int8 level)
 {
 	int i;
 	for (i = 0; i < lay->nlists; i++) {
@@ -971,7 +971,7 @@ static void set_to_table(SFInfo *sf, LayerTable *tbl, SFGenLayer *lay, int level
 }
 
 /* add an item to the table */
-static void add_item_to_table(LayerTable *tbl, int oper, int amount, int level)
+static void add_item_to_table(LayerTable *tbl, uint8 oper, int16 amount)
 {
 	LayerItem *item = &layer_items[oper];
 	int o_lo, o_hi, lo, hi;
@@ -1008,7 +1008,7 @@ static void add_item_to_table(LayerTable *tbl, int oper, int amount, int level)
 /* merge two tables */
 static void merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src)
 {
-	int i;
+	uint8 i;
 	for (i = 0; i < SF_EOF; i++) {
 		if (src->set[i]) {
 			if (sf->version == 1) {
@@ -1018,7 +1018,7 @@ static void merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src)
 					dst->val[i] = src->val[i];
 			}
 			else
-				add_item_to_table(dst, i, src->val[i], P_GLOBAL);
+				add_item_to_table(dst, i, src->val[i]);
 			dst->set[i] = P_GLOBAL;
 		}
 	}
@@ -1027,7 +1027,7 @@ static void merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src)
 /* merge and set default values */
 static void init_and_merge_table(SFInfo *sf, LayerTable *dst, LayerTable *src)
 {
-	int i;
+	uint8 i;
 
 	/* default value is not zero */
 	if (sf->version == 1) {
@@ -1292,16 +1292,16 @@ static void set_sample_info(SFInfo *sf, SampleList *vp, LayerTable *tbl,
 	+ tbl->val[SF_endAddrs]
 	+ sp->endsample - vp->start;
 
-	vp->start = abs(vp->start);
+	vp->start = llabs(vp->start);
 	vp->len = abs(len);
 
     /* set loop position */
-    vp->v.loop_start = (tbl->val[SF_startloopAddrsHi] << 15)
-	+ tbl->val[SF_startloopAddrs]
-	+ sp->startloop - vp->start;
-    vp->v.loop_end = (tbl->val[SF_endloopAddrsHi] << 15)
-	+ tbl->val[SF_endloopAddrs]
-	+ sp->endloop - vp->start;
+    vp->v.loop_start = ((int64)tbl->val[SF_startloopAddrsHi] << 15)
+	+ (int64)tbl->val[SF_startloopAddrs]
+	+ (int64)sp->startloop - (int64)vp->start;
+    vp->v.loop_end = ((int64)tbl->val[SF_endloopAddrsHi] << 15)
+	+ (int64)tbl->val[SF_endloopAddrs]
+	+ (int64)sp->endloop - (int64)vp->start;
 
     /* set data length */
     vp->v.data_length = vp->len + 1;
@@ -1525,8 +1525,8 @@ static void reset_last_sample_info(void)
     last_sample_type = 0;
     /* Set last instrument and keyrange to a value which cannot be represented
        by LayerTable.val (which is a short) */
-    last_sample_instrument = 0x80000000;
-    last_sample_keyrange   = 0x80000000;
+    last_sample_instrument = INT16_MAX+1;
+    last_sample_keyrange   = INT16_MAX+1;
 }
 
 static int abscent_to_Hz(int abscents)
@@ -2069,7 +2069,7 @@ static void convert_tremolo(SampleList *vp, LayerTable *tbl)
     if(!tbl->set[SF_lfo1ToVolume])
 	return;
 
-    level = pow(10.0, (double)abs(tbl->val[SF_lfo1ToVolume]) / -200.0);
+    level = pow(10.0, fabs((double)tbl->val[SF_lfo1ToVolume]) / -200.0);
     vp->v.tremolo_depth = 256 * (1.0 - level);
 	if((int)tbl->val[SF_lfo1ToVolume] < 0) {vp->v.tremolo_depth = -vp->v.tremolo_depth;}
 

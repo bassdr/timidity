@@ -191,26 +191,26 @@ enum rpn_data_address_t /* NRPN/RPN */
     RPN_MAX_DATA_ADDR
 };
 
-#define RX_PITCH_BEND (1<<0)
-#define RX_CH_PRESSURE (1<<1)
-#define RX_PROGRAM_CHANGE (1<<2)
-#define RX_CONTROL_CHANGE (1<<3)
-#define RX_POLY_PRESSURE (1<<4)
-#define RX_NOTE_MESSAGE (1<<5)
-#define RX_RPN (1<<6)
-#define RX_NRPN (1<<7)
-#define RX_MODULATION (1<<8)
-#define RX_VOLUME (1<<9)
-#define RX_PANPOT (1<<10)
-#define RX_EXPRESSION (1<<11)
-#define RX_HOLD1 (1<<12)
-#define RX_PORTAMENTO (1<<13)
-#define RX_SOSTENUTO (1<<14)
-#define RX_SOFT (1<<15)
-#define RX_NOTE_ON (1<<16)
-#define RX_NOTE_OFF (1<<17)
-#define RX_BANK_SELECT (1<<18)
-#define RX_BANK_SELECT_LSB (1<<19)
+#define RX_PITCH_BEND (1u<<0)
+#define RX_CH_PRESSURE (1u<<1)
+#define RX_PROGRAM_CHANGE (1u<<2)
+#define RX_CONTROL_CHANGE (1u<<3)
+#define RX_POLY_PRESSURE (1u<<4)
+#define RX_NOTE_MESSAGE (1u<<5)
+#define RX_RPN (1u<<6)
+#define RX_NRPN (1u<<7)
+#define RX_MODULATION (1u<<8)
+#define RX_VOLUME (1u<<9)
+#define RX_PANPOT (1u<<10)
+#define RX_EXPRESSION (1u<<11)
+#define RX_HOLD1 (1u<<12)
+#define RX_PORTAMENTO (1u<<13)
+#define RX_SOSTENUTO (1u<<14)
+#define RX_SOFT (1u<<15)
+#define RX_NOTE_ON (1u<<16)
+#define RX_NOTE_OFF (1u<<17)
+#define RX_BANK_SELECT (1u<<18)
+#define RX_BANK_SELECT_LSB (1u<<19)
 
 enum {
 	EG_ATTACK = 0,
@@ -277,7 +277,7 @@ struct DrumParts
 
 	int8 chorus_level, reverb_level, delay_level, coarse, fine,
 		play_note, drum_cutoff_freq, drum_resonance;
-	int32 rx;
+	uint32 rx;
 };
 
 typedef struct {
@@ -368,7 +368,7 @@ typedef struct {
   int8 dry_level;
   int8 note_limit_high, note_limit_low;	/* Note Limit (Keyboard Range) */
   int8 vel_limit_high, vel_limit_low;	/* Velocity Limit */
-  int32 rx;	/* Rx. ~ (Rcv ~) */
+  uint32 rx;	/* Rx. ~ (Rcv ~) */
 
   int drum_effect_num;
   int8 drum_effect_flag;

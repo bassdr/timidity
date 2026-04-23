@@ -46,7 +46,7 @@
  */
 
 
-#define MIN_MBLOCK_SIZE 8192
+#define MIN_MBLOCK_SIZE 8192u
 
 typedef struct _MBlockNode
 {

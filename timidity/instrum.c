@@ -1819,14 +1819,14 @@ AlternateAssign *add_altassign_string(AlternateAssign *old,
     return alt;
 }
 
-AlternateAssign *find_altassign(AlternateAssign *altassign, int note)
+AlternateAssign *find_altassign(AlternateAssign *altassign, uint8 note)
 {
     AlternateAssign *p;
     uint32 mask;
-    int idx;
+    uint32 idx;
 
-    mask = 1 << (note & 0x1F);
-    idx = (note >> 5) & 0x3;
+    mask = 1u << (note & 0x1Fu);
+    idx = (note >> 5u) & 0x3u;
     for(p = altassign; p != NULL; p = p->next)
 	if(p->bits[idx] & mask)
 	    return p;

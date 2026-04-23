@@ -39,11 +39,11 @@ void init_string_table(StringTable *stab)
     memset(stab, 0, sizeof(StringTable));
 }
 
-StringTableNode *put_string_table(StringTable *stab, char *str, int len)
+StringTableNode *put_string_table(StringTable *stab, char *str, size_t len)
 {
     StringTableNode *p;
 
-    p = new_segment(&stab->pool, sizeof(StringTableNode) + len + 1);
+    p = new_segment(&stab->pool, sizeof(StringTableNode) + len + 1u);
     if(p == NULL)
 	return NULL;
     p->next = NULL;

@@ -407,7 +407,7 @@ int usleep(unsigned int useconds); /* shut gcc warning up */
 #endif
 #endif /* _MSC_VER */
 
-#define SAFE_CONVERT_LENGTH(len) (6 * (len) + 1)
+#define SAFE_CONVERT_LENGTH(len) (6u * (len) + 1u)
 
 #ifdef __MACOS__
 #include "mac_com.h"

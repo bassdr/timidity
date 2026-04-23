@@ -1677,7 +1677,7 @@ static void do_ch_freeverb(int32 *buf, int32 count, InfoFreeverb *rev)
 		return;
 	}
 
-	for (k = 0; k < count; k++)
+	for (k = 0; k < count; k += 2)
 	{
 		input = reverb_effect_buffer[k] + reverb_effect_buffer[k + 1];
 		outl = outr = reverb_effect_buffer[k] = reverb_effect_buffer[k + 1] = 0;
@@ -1687,7 +1687,7 @@ static void do_ch_freeverb(int32 *buf, int32 count, InfoFreeverb *rev)
 		for (i = 0; i < numcombs; i++) {
 			/* Phase increment scaled to sample rate (pairs share phase) */
 			uint32 phase_inc = (uint32)(comb_mod_rates[i] * 4294967296.0 / play_mode->rate);
-			rev->mod_phase[i] += phase_inc;
+			rev->mod_phase[i] = (uint32)((uint64)rev->mod_phase[i] + phase_inc);
 
 			do_freeverb_comb_mod(input, &outl, combL[i].buf, combL[i].size, &combL[i].index,
 				combL[i].damp1i, combL[i].damp2i, &combL[i].filterstore, combL[i].feedbacki,
@@ -1709,7 +1709,6 @@ static void do_ch_freeverb(int32 *buf, int32 count, InfoFreeverb *rev)
 
 		buf[k] += imuldiv24(outl, rev->wet1i) + imuldiv24(outr, rev->wet2i);
 		buf[k + 1] += imuldiv24(outr, rev->wet1i) + imuldiv24(outl, rev->wet2i);
-		++k;
 	}
 }
 
@@ -1909,7 +1908,7 @@ static void do_ch_plate_reverb(int32 *buf, int32 count, InfoPlateReverb *info)
 		return;
 	}
 
-	for (i = 0; i < count; i++)
+	for (i = 0; i < count; i += 2)
 	{
 		outr = outl = 0;
 		x = (reverb_effect_buffer[i] + reverb_effect_buffer[i + 1]) >> 1;
@@ -1982,8 +1981,6 @@ static void do_ch_plate_reverb(int32 *buf, int32 count, InfoPlateReverb *info)
 
 		buf[i] += outl;
 		buf[i + 1] += outr;
-
-		++i;
 	}
 	info->t1 = t1, info->t1d = t1d;
 }
@@ -2843,7 +2840,7 @@ void do_overdrive1(int32 *buf, int32 count, EffectList *ef)
 	} else if(count == MAGIC_FREE_EFFECT_INFO) {
 		return;
 	}
-	for(i = 0; i < count; i++) {
+	for(i = 0; i < count; i += 2) {
 		input = (buf[i] + buf[i + 1]) >> 1;
 		/* amp simulation */
 		do_amp_sim(&input, asdi);
@@ -2858,7 +2855,6 @@ void do_overdrive1(int32 *buf, int32 count, EffectList *ef)
 		input = imuldiv24(high + input, leveli);
 		buf[i] = do_left_panning(input, pan);
 		buf[i + 1] = do_right_panning(input, pan);
-		++i;
 	}
 }
 
@@ -2894,7 +2890,7 @@ void do_distortion1(int32 *buf, int32 count, EffectList *ef)
 	} else if(count == MAGIC_FREE_EFFECT_INFO) {
 		return;
 	}
-	for(i = 0; i < count; i++) {
+	for(i = 0; i < count; i += 2) {
 		input = (buf[i] + buf[i + 1]) >> 1;
 		/* amp simulation */
 		do_amp_sim(&input, asdi);
@@ -2909,7 +2905,6 @@ void do_distortion1(int32 *buf, int32 count, EffectList *ef)
 		input = imuldiv24(high + input, leveli);
 		buf[i] = do_left_panning(input, pan);
 		buf[i + 1] = do_right_panning(input, pan);
-		++i;
 	}
 }
 
@@ -3081,7 +3076,7 @@ void do_hexa_chorus(int32 *buf, int32 count, EffectList *ef)
 	spt5 = index - pdelay5 - (f5 >> 8);	/* integral part of delay */
 	if(spt5 < 0) {spt5 += size;}
 
-	for(i = 0; i < count; i++) {
+	for(i = 0; i < count; i += 2) {
 		v0 = ebuf[spt0], v1 = ebuf[spt1], v2 = ebuf[spt2],
 		v3 = ebuf[spt3], v4 = ebuf[spt4], v5 = ebuf[spt5];
 
@@ -3132,8 +3127,6 @@ void do_hexa_chorus(int32 *buf, int32 count, EffectList *ef)
 			+ do_right_panning(hist2, pan2) + do_right_panning(hist3, pan3)
 			+ do_right_panning(hist4, pan4) + do_right_panning(hist5, pan5)
 			+ imuldiv24(buf[i + 1], dryi);
-
-		++i;
 	}
 	buf0->size = size, buf0->index = index;
 	info->spt0 = spt0, info->spt1 = spt1, info->spt2 = spt2,

@@ -228,7 +228,7 @@ static resample_t resample_gauss(sample_t *src, splen_t ofs, resample_rec_t *rec
 	if (temp_n <= 0)
 	    temp_n = 1;
 	xd = ofs & FRACTION_MASK;
-	xd /= (1L<<FRACTION_BITS);
+	xd /= (1LLU<<FRACTION_BITS);
 	xd += temp_n>>1;
 	y = 0;
 	sptr = src + (ofs>>FRACTION_BITS) - (temp_n>>1);

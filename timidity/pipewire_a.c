@@ -654,6 +654,11 @@ static void close_output(void)
 	pthread_cond_destroy(&ctx.cond);
 
 	pw_deinit();
+
+	/* reset to defaults so next open_output() starts clean */
+	audio_buffer_bits = DEFAULT_AUDIO_BUFFER_BITS;
+	dpm.extra_param[0] = 0;
+
 	dpm.fd = -1;
 }
 

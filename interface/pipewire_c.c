@@ -849,9 +849,6 @@ static int start_sequencer(void)
 	}
 
 	pwctx.active = 1;
-
-	pwctx_reset_timebase();
-
 	return 1;
 }
 

@@ -1,3 +1,5 @@
+#pragma once
+
 /* 
     TiMidity++ -- MIDI to WAVE converter and player
     Copyright (C) 1999-2002 Masanao Izumo <mo@goice.co.jp>
@@ -24,6 +26,8 @@
 
 #ifndef ___QUANTITY_H_
 #define ___QUANTITY_H_
+
+#include "timidity.h"
 
 #define QUANTITY_UNIT_TYPE(u)		QUANTITY_OF_##u, QUANTITY_UNIT_NAME(u##_NUM)
 #define QUANTITY_UNIT_NAME(name)	QUANTITY_UNIT_##name

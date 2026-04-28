@@ -33,6 +33,7 @@
 #include <unistd.h>
 #endif /* HAVE_UNISTD_H */
 #include <stdlib.h>
+#include <math.h>
 
 #ifndef NO_STRING_H
 #include <string.h>
@@ -112,7 +113,7 @@ struct cache_hash *resamp_cache_fetch(Sample *sp, int note)
 	
 	if (sp->vibrato_control_ratio || (sp->modes & MODES_PINGPONG)
 			|| (sp->sample_rate == play_mode->rate
-			&& sp->root_freq == get_note_freq(sp, sp->note_to_use)))
+			&& llround(sp->root_freq) == llround(get_note_freq(sp, sp->note_to_use))))
 		return NULL;
 	addr = sp_hash(sp, note) % HASH_TABLE_SIZE;
 	p = cache_hash_table[addr];
@@ -134,8 +135,8 @@ void resamp_cache_refer_on(Voice *vp, int32 sample_start)
 			|| (vp->sample->modes & MODES_PINGPONG)
 			|| vp->orig_frequency != vp->frequency
 			|| (vp->sample->sample_rate == play_mode->rate
-			&& vp->sample->root_freq
-			== get_note_freq(vp->sample, vp->sample->note_to_use)))
+			&& llround(vp->sample->root_freq)
+			== llround(get_note_freq(vp->sample, vp->sample->note_to_use))))
 		return;
 	note = vp->note;
 	if (channel_note_table[ch].cache[note])
@@ -169,7 +170,7 @@ void resamp_cache_refer_off(int ch, int note, int32 sample_end)
 		return;
 	sp = p->sp;
 	if (sp->sample_rate == play_mode->rate
-			&& sp->root_freq == get_note_freq(sp, sp->note_to_use))
+			&& llround(sp->root_freq) == llround(get_note_freq(sp, sp->note_to_use)))
 		return;
 	sample_start = channel_note_table[ch].on[note];
 	len = sample_end - sample_start;
@@ -181,8 +182,8 @@ void resamp_cache_refer_off(int ch, int note, int32 sample_end)
 		double a;
 		int32 slen;
 		
-		a = ((double) sp->root_freq * play_mode->rate)
-				/ ((double) sp->sample_rate * get_note_freq(sp, note));
+		a = ((FLOAT_T)sp->root_freq * (FLOAT_T)play_mode->rate)
+				/ ((FLOAT_T)sp->sample_rate * get_note_freq(sp, note));
 		slen = (int32) ((sp->data_length >> FRACTION_BITS) * a);
 		if (len > slen)
 			len = slen;
@@ -291,8 +292,8 @@ static double sample_resamp_info(Sample *sp, int note,
 	splen_t xls, xle, ls, le, ll, newlen;
 	double a, xxls, xxle, xn;
 	
-	a = ((double) sp->sample_rate * get_note_freq(sp, note))
-			/ ((double) sp->root_freq * play_mode->rate);
+	a = ((FLOAT_T)sp->sample_rate * get_note_freq(sp, note))
+			/ ((FLOAT_T)sp->root_freq * (FLOAT_T)play_mode->rate);
 	a = TIM_FSCALENEG((double) (int32) TIM_FSCALE(a, FRACTION_BITS),
 			FRACTION_BITS);
 	xn = sp->data_length / a;

@@ -2435,18 +2435,16 @@ int reduce_quality_flag = 0;
 Voice *voice = NULL;
 Channel channel[MAX_CHANNELS];
 // from playmidi.c
-int32 get_note_freq(Sample *sp, int note)
+FLOAT_T get_note_freq(Sample *sp, uint8 note)
 {
-	int32 f;
 	int16 sf, sn;
 	double ratio;
 	
-	f = freq_table[note];
+	FLOAT_T f = freq_table[note];
 	/* GUS/SF2 - Scale Tuning */
-	if ((sf = sp->scale_factor) != 1024) {
-		sn = sp->scale_freq;
-		ratio = pow(2.0, (note - sn) * (sf - 1024) / 12288.0);
-		f = f * ratio + 0.5;
+	if (sp->scale_factor != 1024) {
+		ratio = pow(2.0, (note - sp->scale_freq) * (sp->scale_factor - 1024) / 12288.0);
+		f *= ratio;
 	}
 	return f;
 }

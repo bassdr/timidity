@@ -1428,7 +1428,7 @@ resample_t *resample_voice(int v, int32 *countptr)
 	int32 i;
 
     if(vp->sample->sample_rate == play_mode->rate &&
-       vp->sample->root_freq == get_note_freq(vp->sample, vp->sample->note_to_use) &&
+       llround(vp->sample->root_freq) == llround(get_note_freq(vp->sample, vp->sample->note_to_use)) &&
        vp->frequency == vp->orig_frequency)
     {
 	int32 ofs;
@@ -1493,16 +1493,16 @@ void pre_resample(Sample * sp)
   double a, b;
   splen_t ofs, newlen;
   sample_t *newdata, *dest, *src = (sample_t *)sp->data;
-  int32 i, count, incr, f, x;
+  int32 i, count, incr, x;
   resample_rec_t resrc;
 
   ctl->cmsg(CMSG_INFO, VERB_DEBUG, " * pre-resampling for note %d (%s%d)",
 	    sp->note_to_use,
 	    note_name[sp->note_to_use % 12], (sp->note_to_use & 0x7F) / 12);
 
-  f = get_note_freq(sp, sp->note_to_use);
-  a = b = ((double) (sp->root_freq) * play_mode->rate) /
-      ((double) (sp->sample_rate) * f);
+  FLOAT_T f = get_note_freq(sp, sp->note_to_use);
+  a = b = (sp->root_freq * (FLOAT_T)play_mode->rate) /
+      ((FLOAT_T)sp->sample_rate * f);
   if((int64)sp->data_length * a >= 0x7fffffffL)
   {
       /* Too large to compute */

@@ -270,7 +270,7 @@ struct DrumPartEffect
 
 struct DrumParts
 {
-    int8 drum_panning;
+    uint8 drum_panning;
     int32 drum_envelope_rate[6]; /* drum instrument envelope */
     int8 pan_random;    /* flag for drum random pan */
 	float drum_level;
@@ -281,7 +281,7 @@ struct DrumParts
 };
 
 typedef struct {
-  int8	bank_msb, bank_lsb, bank, program, volume,
+  uint8	bank, bank_msb, bank_lsb, program, volume,
 	expression, sustain, panning, mono, portamento,
 	key_shift, loop_timeout;
 
@@ -379,7 +379,7 @@ typedef struct {
 } Channel;
 
 /* Causes the instrument's default panning to be used. */
-#define NO_PANNING -1
+#define NO_PANNING UINT8_MAX
 
 typedef struct {
 	int16 freq, last_freq, orig_freq;
@@ -614,8 +614,12 @@ extern void playmidi_stream_free(void);
 extern int play_event(MidiEvent *ev);
 
 extern void recompute_voice_filter(int);
-extern int32 get_note_freq(Sample *, int);
+extern FLOAT_T get_note_freq(Sample *, uint8);
+extern FLOAT_T get_note_freq_sf(int16 scale_freq, int16 scale_factor, uint8 note);
 
 extern void free_drum_effect(int);
+
+extern int compute_freq_table_index(int current_keysig,
+                                    int note_key_offset);
 
 #endif /* ___PLAYMIDI_H_ */

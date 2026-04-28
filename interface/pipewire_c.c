@@ -903,8 +903,8 @@ static void doit(void)
 	struct midi_msg *msg;
 	static uint32 local_epoch = 0;
 	static uint8 rebase_pending = 0;
-	static const int32 REBASE_THRESHOLD = INT_MAX / 2;       /* ~6.2h at 48kHz: schedule rebase */
-	static const int32 REBASE_DEADLINE  = INT_MAX / 5 * 4;   /* ~9.9h at 48kHz: force rebase */
+	static const int32 REBASE_THRESHOLD = INT32_MAX / 2;       /* ~6.2h at 48kHz: schedule rebase */
+	static const int32 REBASE_DEADLINE  = INT32_MAX / 5 * 4;   /* ~9.9h at 48kHz: force rebase */
 
 	for (;;) {
 		if (quit_flag || pw_disconnected)
@@ -1141,36 +1141,6 @@ static void reset_realtime_priority(void)
 		printf("munlockall: memory unlocked\n");
 	else
 		perror("munlockall (non-fatal, run as root or set memlock ulimit)");
-}
-
-// Normalize value into [0, 11]
-static inline int normalize_mod12(int value)
-{
-	value %= 12;
-	if (value < 0)
-		value += 12;
-	return value;
-}
-
-static int compute_freq_table_index(int current_keysig,
-                                    int note_key_offset)
-{
-	int i = current_keysig < 8 ? current_keysig + 7 : current_keysig - 9;
-	int j = 0;
-
-	while (i != 7) {
-		if (j > 12)
-			return 0;  // should not happen, avoid infinite loop
-
-		if (i < 7)
-			i += 5;
-		else
-			i -= 7;
-
-		j++;
-	}
-
-	return normalize_mod12(j + note_key_offset);
 }
 
 static int ctl_pass_playing_list(int n, char *args[])

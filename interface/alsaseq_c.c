@@ -383,11 +383,7 @@ static int ctl_pass_playing_list(int n, char *args[])
 	signal(SIGTERM, safe_exit);
 	signal(SIGHUP, sig_reset);
 
-	i = current_keysig + ((current_keysig < 8) ? 7 : -9), j = 0;
-	while (i != 7)
-		i += (i < 7) ? 5 : -7, j++;
-	j += note_key_offset, j -= floor(j / 12.0) * 12;
-	current_freq_table = j;
+	current_freq_table = compute_freq_table_index(current_keysig, note_key_offset);
 
 	for (;;) {
 		server_reset();

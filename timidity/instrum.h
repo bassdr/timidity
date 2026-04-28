@@ -1,3 +1,5 @@
+#pragma once
+
 /*
     TiMidity++ -- MIDI to WAVE converter and player
     Copyright (C) 1999-2002 Masanao Izumo <mo@goice.co.jp>
@@ -24,12 +26,16 @@
 #ifndef ___INSTRUM_H_
 #define ___INSTRUM_H_
 
+#include "timidity.h"
+
 typedef struct _Sample {
   splen_t
     loop_start, loop_end, data_length;
   int32
-    sample_rate, low_freq, high_freq, root_freq;
-  int8 panning, note_to_use;
+    sample_rate, low_freq, high_freq;
+  FLOAT_T root_freq;
+  int8 panning;
+  uint8 note_to_use;
   int32
     envelope_rate[6], envelope_offset[6],
 	modenv_rate[6], modenv_offset[6];
@@ -200,7 +206,7 @@ extern int fast_decay;
 extern int free_instruments_afterwards;
 extern int cutoff_allowed;
 
-#define SPECIAL_PROGRAM -1
+#define SPECIAL_PROGRAM UINT8_MAX
 
 /* sndfont.c */
 extern int opt_sf_close_each_file;

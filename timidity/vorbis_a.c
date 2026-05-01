@@ -52,6 +52,7 @@ extern void free_vorbisenc_dll(void);
 #include <stdlib.h>
 #include <ctype.h>
 #include <time.h>
+#include <math.h>
 #elif HAVE_STRINGS_H
 #include <strings.h>
 #endif
@@ -154,7 +155,7 @@ choose_bitrate(int nch, int rate)
 		bitrate = ogg_vorbis_mode;
 	return bitrate;
 #endif
-  return (int)(nch * rate * (128000.0 / (2.0 * 44100.0)) + 0.5); /* +0.5 for rounding */
+  return (int)lrint(nch * rate * (128000.0 / (2.0 * 44100.0)));
 }
 #else
 static int
@@ -163,7 +164,7 @@ choose_bitrate(int nch, int rate)
   int target;
 
   /* 44.1kHz 2ch --> 128kbps */
-  target = (int)(nch * rate * (128000.0 / (2.0 * 44100.0)) + 0.5); /* +0.5 for rounding */
+  target = (int)lrint(nch * rate * (128000.0 / (2.0 * 44100.0)));
 
   return target;
 }

@@ -436,7 +436,7 @@ float freq_fourier(Sample *sp, int *chord)
     if (max_guessfreq >= (rate >> 1)) max_guessfreq = (rate >> 1) - 1;
 
     /* lower bound on the detected frequency */
-    maxoffset = rate / pitch_freq_lb_table[LOWEST_PITCH] + 0.5;
+    maxoffset = lrint(rate / pitch_freq_lb_table[LOWEST_PITCH]);
     if (maxoffset > (length >> 1))
 	maxoffset = (length >> 1);
     min_guessfreq = (float) rate / maxoffset;

@@ -1428,7 +1428,7 @@ resample_t *resample_voice(int v, int32 *countptr)
 	int32 i;
 
     if(vp->sample->sample_rate == play_mode->rate &&
-       llround(vp->sample->root_freq) == llround(get_note_freq(vp->sample, vp->sample->note_to_use)) &&
+       llrint(vp->sample->root_freq) == llrint(get_note_freq(vp->sample, vp->sample->note_to_use)) &&
        vp->frequency == vp->orig_frequency)
     {
 	int32 ofs;

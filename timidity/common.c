@@ -211,7 +211,7 @@ url_dumpfile(URL url, const char *ext)
   }
 
   while((n = url_read(url, buff, sizeof(buff))) > 0) {
-    size_t dummy = fwrite(buff, 1, n, fp); ++dummy;
+    (void)fwrite(buff, 1, n, fp);
   }
   fclose(fp);
   return safe_strdup(filename);

@@ -18,8 +18,6 @@
     Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
-#include "instrum.h"
-
 extern float pitch_freq_table[129];
 extern float pitch_freq_ub_table[129];
 extern float pitch_freq_lb_table[129];

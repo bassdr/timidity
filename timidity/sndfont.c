@@ -1545,7 +1545,7 @@ static void set_rootkey(SFInfo *sf, SampleList *vp, LayerTable *tbl)
 	int temp;
 	
 	/* scale factor */
-	vp->v.scale_factor = 1024 * (double) tbl->val[SF_scaleTuning] / 100 + 0.5;
+	vp->v.scale_factor = (int16)lrint(1024. * tbl->val[SF_scaleTuning] / 100.);
 	/* set initial root key & fine tune */
 	if (sf->version == 1 && tbl->set[SF_samplePitch]) {
 		/* set from sample pitch */
@@ -1575,8 +1575,7 @@ static void set_rootkey(SFInfo *sf, SampleList *vp, LayerTable *tbl)
 	vp->v.modenv_to_pitch =
 			(tbl->set[SF_env1ToPitch]) ? tbl->val[SF_env1ToPitch] : 0;
 	/* correct tune with the sustain level of modulation envelope */
-	temp = vp->v.modenv_to_pitch
-			* (double) (1000 - tbl->val[SF_sustainEnv1]) / 1000 + 0.5;
+	temp = lrint(vp->v.modenv_to_pitch * (1000. - tbl->val[SF_sustainEnv1]) / 1000.);
 	vp->tune += temp, vp->v.modenv_to_pitch -= temp;
 	vp->v.modenv_to_fc =
 			(tbl->set[SF_env1ToFilterFc]) ? tbl->val[SF_env1ToFilterFc] : 0;
@@ -1593,15 +1592,13 @@ static void set_rootfreq(SampleList *vp)
 	while (tune > 255)
 		root++, tune -= 256;
 	if (root < 0) {
-		vp->v.root_freq = freq_table[0] * (double) bend_fine[tune]
-				/ bend_coarse[-root] + 0.5;
+		vp->v.root_freq = freq_table[0] * bend_fine[tune] / bend_coarse[-root];
 		vp->v.scale_freq = 0;		/* scale freq */
 	} else if (root > 127) {
-		vp->v.root_freq = freq_table[127] * (double) bend_fine[tune]
-				* bend_coarse[root - 127] + 0.5;
+		vp->v.root_freq = freq_table[127] * bend_fine[tune] * bend_coarse[root - 127];
 		vp->v.scale_freq = 127;		/* scale freq */
 	} else {
-		vp->v.root_freq = freq_table[root] * (double) bend_fine[tune] + 0.5;
+		vp->v.root_freq = freq_table[root] * bend_fine[tune];
 		vp->v.scale_freq = root;	/* scale freq */
 	}
 }
@@ -1833,28 +1830,28 @@ static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
 			/* SF2 modulator amount is full-range timecents (output =
 			 * (127-vel)/127 * amount).  Convert to timecents/key for
 			 * the runtime formula: rate *= 2^((vel-bpo)*velf/1200). */
-			sp->envelope_velf[0] += (int16)lround(amount / 127.0);
+			sp->envelope_velf[0] += (int16)lrint(amount / 127.0);
 			return 1;
 		case SF_holdEnv2:
-			sp->envelope_velf[1] += (int16)lround(amount / 127.0);
+			sp->envelope_velf[1] += (int16)lrint(amount / 127.0);
 			return 1;
 		case SF_decayEnv2:
-			sp->envelope_velf[2] += (int16)lround(amount / 127.0);
+			sp->envelope_velf[2] += (int16)lrint(amount / 127.0);
 			return 1;
 		case SF_releaseEnv2:
-			sp->envelope_velf[4] += (int16)lround(amount / 127.0);
+			sp->envelope_velf[4] += (int16)lrint(amount / 127.0);
 			return 1;
 		case SF_attackEnv1:
-			sp->modenv_velf[0] += (int16)lround(amount / 127.0);
+			sp->modenv_velf[0] += (int16)lrint(amount / 127.0);
 			return 1;
 		case SF_holdEnv1:
-			sp->modenv_velf[1] += (int16)lround(amount / 127.0);
+			sp->modenv_velf[1] += (int16)lrint(amount / 127.0);
 			return 1;
 		case SF_decayEnv1:
-			sp->modenv_velf[2] += (int16)lround(amount / 127.0);
+			sp->modenv_velf[2] += (int16)lrint(amount / 127.0);
 			return 1;
 		case SF_releaseEnv1:
-			sp->modenv_velf[4] += (int16)lround(amount / 127.0);
+			sp->modenv_velf[4] += (int16)lrint(amount / 127.0);
 			return 1;
 		}
 	} else if (mod_src_is_key(mod->src_oper)) {
@@ -1864,12 +1861,12 @@ static int apply_mod_to_sample(const SFModRec *mod, int16 amount, Sample *sp)
 				/* Bipolar: output = (2*key/127 - 1) * amount
 				 * = 2*amount/127 * (key - 63.5).
 				 * Map to runtime: cent += key_to_fc * (note - bpo) */
-				sp->key_to_fc += (int16)lround(2.0 * amount / 127.0);
+				sp->key_to_fc += (int16)lrint(2.0 * amount / 127.0);
 				sp->key_to_fc_bpo = 64;
 			} else {
 				/* Unipolar: output = key/127 * amount
 				 * = amount/127 * (key - 0) */
-				sp->key_to_fc += (int16)lround(amount / 127.0);
+				sp->key_to_fc += (int16)lrint(amount / 127.0);
 			}
 			return 1;
 		}

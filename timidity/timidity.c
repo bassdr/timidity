@@ -1565,8 +1565,6 @@ MAIN_INTERFACE int read_config_file(char *name, int self, int allow_missing_file
 	/* #extension HTTPproxy hostname:port */
 	else if(strcmp(w[0], "HTTPproxy") == 0)
 	{
-            char r_bracket, l_bracket;
-
 	    if(words < 2)
 	    {
 		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
@@ -1595,8 +1593,8 @@ MAIN_INTERFACE int read_config_file(char *name, int self, int allow_missing_file
 		continue;
 	    }
 
-            l_bracket = url_http_proxy_host[0];
-            r_bracket = url_http_proxy_host[strlen(url_http_proxy_host) - 1];
+            char l_bracket = url_http_proxy_host[0];
+            char r_bracket = url_http_proxy_host[strlen(url_http_proxy_host) - 1];
 
             if (l_bracket == '[' || r_bracket == ']')
             {
@@ -1615,9 +1613,7 @@ MAIN_INTERFACE int read_config_file(char *name, int self, int allow_missing_file
 	}
 	/* #extension FTPproxy hostname:port */
 	else if(strcmp(w[0], "FTPproxy") == 0)
-	{
-            char l_bracket, r_bracket;
- 
+	{ 
 	    if(words < 2)
 	    {
 		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
@@ -1646,8 +1642,8 @@ MAIN_INTERFACE int read_config_file(char *name, int self, int allow_missing_file
 		continue;
 	    }
 
-            l_bracket = url_ftp_proxy_host[0];
-            r_bracket = url_ftp_proxy_host[strlen(url_ftp_proxy_host) - 1];
+            char l_bracket = url_ftp_proxy_host[0];
+            char r_bracket = url_ftp_proxy_host[strlen(url_ftp_proxy_host) - 1];
 
             if (l_bracket == '[' || r_bracket == ']')
             {
@@ -4139,7 +4135,6 @@ static int parse_opt_h(const char *arg)
 	int i, j;
 	char *h;
 	ControlMode *cmp, **cmpp;
-	char mark[128];
 	PlayMode *pmp, **pmpp;
 	WRDTracer *wlp, **wlpp;
 	
@@ -4254,6 +4249,8 @@ static int parse_opt_h(const char *arg)
 #ifdef IA_DYNAMIC
 	fprintf(fp, "Supported dynamic load interfaces (%s):" NLS,
 			dynamic_lib_root);
+
+	char mark[128];
 	memset(mark, 0, sizeof(mark));
 	for (cmpp = ctl_list; (cmp = *cmpp) != NULL; cmpp++)
 		mark[(int) cmp->id_character] = 1;
@@ -5029,7 +5026,7 @@ static inline int parse_opt_s(const char *arg)
 	int32 freq;
 
 	if ((freq = atoi(arg)) < 100)
-		freq = atof(arg) * 1000 + 0.5;
+		freq = lrint(atof(arg) * 1000.);
 	return set_val_i32(&opt_output_rate, freq,
 			MIN_OUTPUT_RATE, MAX_OUTPUT_RATE, "Resampling frequency");
 }
@@ -5406,21 +5403,16 @@ static void interesting_message(void)
 static RETSIGTYPE sigterm_exit(int sig)
 {
     char s[4];
-#if defined(__MINGW32__) && !defined(HAVE_SSIZE_T)
-    int dummy;
-#else
-    ssize_t dummy;
-#endif
 
     /* NOTE: Here, fprintf is dangerous because it is not re-enterance
      * function.  It is possible coredump if the signal is called in printf's.
      */
 
-    dummy = write(2, "Terminated sig=0x", 17);
+    (void)write(2, "Terminated sig=0x", 17);
     s[0] = "0123456789abcdef"[(sig >> 4) & 0xf];
     s[1] = "0123456789abcdef"[sig & 0xf];
     s[2] = '\n';
-    dummy += write(2, s, 3);
+    (void)write(2, s, 3);
 
     safe_exit(1);
 }

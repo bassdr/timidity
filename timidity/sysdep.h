@@ -280,7 +280,7 @@ typedef uint32 splen_t;
 #endif	/* TIMIDITY_HAVE_INT64 */
 #elif SAMPLE_LENGTH_BITS == 32
 typedef uint32 splen_t;
-#define SPLEN_T_MAX (splen_t)((uint32)0xFFFFFFFF)
+#define SPLEN_T_MAX ((splen_t)0xFFFFFFFFu)
 #else	/* SAMPLE_LENGTH_BITS */
 typedef int32 splen_t;
 #define SPLEN_T_MAX (splen_t)((((uint32)1)<<31)-1)

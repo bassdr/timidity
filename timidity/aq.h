@@ -1,5 +1,3 @@
-#pragma once
-
 /*
     TiMidity++ -- MIDI to WAVE converter and player
     Copyright (C) 1999-2002 Masanao Izumo <mo@goice.co.jp>
@@ -25,8 +23,6 @@
 
 #ifndef ___AQ_H_
 #define ___AQ_H_
-
-#include "sysdep.h"
 
 /* interfaces */
 

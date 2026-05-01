@@ -719,18 +719,19 @@ char *create_auto_output_name(const char *input_filename, char *ext_str, char *o
 	  *p = '_';
 
     if(mode==2){
-      char *p1,*p2,*p3;
 #ifndef __W32__
       p = strrchr(output_filename+dir_len,PATH_SEP);
+      char *p1;
+      char *p2;
 #else
 #ifdef _mbsrchr
 #define STRRCHR _mbsrchr
 #else
 #define STRRCHR strrchr
 #endif
-      p1 = STRRCHR(output_filename+dir_len,'/');
-      p2 = STRRCHR(output_filename+dir_len,'\\');
-      p3 = STRRCHR(output_filename+dir_len,':');
+      char* p1 = STRRCHR(output_filename+dir_len,'/');
+      char* p2 = STRRCHR(output_filename+dir_len,'\\');
+      char* p3 = STRRCHR(output_filename+dir_len,':');
 #undef STRRCHR
       p1>p2 ? (p1>p3 ? (p = p1) : (p = p3)) : (p2>p3 ? (p = p2) : (p = p3));
 #endif

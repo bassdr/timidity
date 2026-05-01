@@ -44,35 +44,29 @@
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif /* HAVE_UNISTD_H */
-#include "aq.h"
-#include "arc.h"
-#include "common.h"
-#include "controls.h"
-#include "freq.h"
-#include "instrum.h"
-#include "miditrace.h"
-#include "mix.h"
-#include "output.h"
-#include "playmidi.h"
-#include "quantity.h"
-#include "readmidi.h"
-#include "recache.h"
-#include "reverb.h"
 #include "timidity.h"
+#include "common.h"
+#include "instrum.h"
+#include "playmidi.h"
+#include "readmidi.h"
+#include "output.h"
+#include "mix.h"
+#include "controls.h"
+#include "miditrace.h"
+#include "recache.h"
+#include "arc.h"
+#include "reverb.h"
 #include "wrd.h"
+#include "aq.h"
+#include "freq.h"
+#include "quantity.h"
 
 #include <assert.h>
 
 extern int convert_mod_to_midi_file(MidiEvent *ev);
 
 #define ABORT_AT_FATAL 1 /*#################*/
-#define MYCHECK(s)                                                             \
-	do {                                                                   \
-		if (s == 0) {                                                  \
-			printf("## L %d\n", __LINE__);                         \
-			abort();                                               \
-		}                                                              \
-	} while (0)
+#define MYCHECK(s) do { if(s == 0) { printf("## L %d\n", __LINE__); abort(); } } while(0)
 
 extern VOLATILE int intr;
 
@@ -89,17 +83,17 @@ int usleep(unsigned int useconds);
 
 #include "tables.h"
 
-#define PLAY_INTERLEAVE_SEC 1.0
-#define PORTAMENTO_TIME_TUNING (1.0 / 5000.0)
-#define PORTAMENTO_CONTROL_RATIO 256 /* controls per sec */
-#define DEFAULT_CHORUS_DELAY1 0.02
-#define DEFAULT_CHORUS_DELAY2 0.003
-#define CHORUS_OPPOSITE_THRESHOLD 32
-#define EOT_PRESEARCH_LEN 32
-#define SPEED_CHANGE_RATE 1.0594630943592953 /* 2^(1/12) */
+#define PLAY_INTERLEAVE_SEC		1.0
+#define PORTAMENTO_TIME_TUNING		(1.0 / 5000.0)
+#define PORTAMENTO_CONTROL_RATIO	256	/* controls per sec */
+#define DEFAULT_CHORUS_DELAY1		0.02
+#define DEFAULT_CHORUS_DELAY2		0.003
+#define CHORUS_OPPOSITE_THRESHOLD	32
+#define EOT_PRESEARCH_LEN		32
+#define SPEED_CHANGE_RATE		1.0594630943592953  /* 2^(1/12) */
 
 /* Undefine if you don't want to use auto voice reduce implementation */
-#define REDUCE_VOICE_TIME_TUNING (play_mode->rate / 5) /* 0.2 sec */
+#define REDUCE_VOICE_TIME_TUNING	(play_mode->rate/5) /* 0.2 sec */
 #ifdef REDUCE_VOICE_TIME_TUNING
 static int max_good_nv = 1;
 static int min_bad_nv = 256;
@@ -111,8 +105,7 @@ static int old_rate = -1;
 #endif
 
 static int midi_streaming = 0;
-int volatile stream_max_compute =
-    500; /* compute time limit (in msec) when streaming */
+int volatile stream_max_compute = 500; /* compute time limit (in msec) when streaming */
 static int prescanning_flag;
 static int32 midi_restart_time = 0;
 Channel channel[MAX_CHANNELS];
@@ -760,7 +753,7 @@ void reset_midi(int playing) {
 	}
 	ctl_mode_event(CTLE_MASTER_VOLUME, 0, amplification, 0);
 	ctl_mode_event(CTLE_KEY_OFFSET, 0, note_key_offset, 0);
-	ctl_mode_event(CTLE_TIME_RATIO, 0, lround(100. / midi_time_ratio), 0);
+	ctl_mode_event(CTLE_TIME_RATIO, 0, lrint(100. / midi_time_ratio), 0);
 }
 
 void recompute_freq(int v) {
@@ -2162,12 +2155,12 @@ static int select_play_sample(Sample *splist, int nsp, int *note, int *vlist,
 		if ((sf = sp->scale_factor) != 1024) {
 			sn = sp->scale_freq;
 			ratio = pow(2.0, (*note - sn) * (sf - 1024) / 12288.0);
-			ft = lround(f * ratio), fst = lround(fs * ratio);
+			ft = lrint(f * ratio), fst = lrint(fs * ratio);
 		} else
 			ft = f, fst = fs;
 		if (ISDRUMCHANNEL(ch) && channel[ch].drums[kn] != NULL)
 			if ((ratio = get_play_note_ratio(ch, kn)) != 1.0)
-				ft = lround(ft * ratio), fst = lround(fst * ratio);
+				ft = lrint(ft * ratio), fst = lrint(fst * ratio);
 		if (sp->low_freq <= fst && sp->high_freq >= fst &&
 		    sp->low_vel <= vel && sp->high_vel >= vel &&
 		    !(sp->inst_type == INST_SF2 &&
@@ -2191,15 +2184,15 @@ static int select_play_sample(Sample *splist, int nsp, int *note, int *vlist,
 				sn = sp->scale_freq;
 				ratio = pow(2.0, (*note - sn) * (sf - 1024) /
 				                     12288.0);
-				ft = lround(f * ratio), fst = lround(fs * ratio);
+				ft = lrint(f * ratio), fst = lrint(fs * ratio);
 			} else
 				ft = f, fst = fs;
 			if (ISDRUMCHANNEL(ch) && channel[ch].drums[kn] != NULL)
 				if ((ratio = get_play_note_ratio(ch, kn)) !=
 				    1.0)
-					ft = lround(ft * ratio),
-					fst = lround(fst * ratio);
-			diff = lround(fabs(sp->root_freq - fst));
+					ft = lrint(ft * ratio),
+					fst = lrint(fst * ratio);
+			diff = lrint(fabs(sp->root_freq - fst));
 			if (diff < cdiff) {
 				if (sp->inst_type == INST_SF2 &&
 				    sp->sample_type == SF_SAMPLETYPE_RIGHT) {
@@ -2241,7 +2234,7 @@ static int select_play_sample(Sample *splist, int nsp, int *note, int *vlist,
 						    pow(2.0, (*note - sn) *
 						                 (sf - 1024) /
 						                 12288.0);
-						ft = lround(f * ratio);
+						ft = lrint(f * ratio);
 					} else
 						ft = f;
 					if (ISDRUMCHANNEL(ch) &&
@@ -2249,7 +2242,7 @@ static int select_play_sample(Sample *splist, int nsp, int *note, int *vlist,
 						if ((ratio =
 						         get_play_note_ratio(
 						             ch, kn)) != 1.0)
-							ft = lround(ft * ratio);
+							ft = lrint(ft * ratio);
 					k = vlist[nv] = find_voice(e);
 					voice[k].orig_frequency = ft;
 					MYCHECK(voice[k].orig_frequency);
@@ -3648,11 +3641,11 @@ void midi_program_change(int ch, int prog) {
 }
 
 static int16 conv_lfo_pitch_depth(float val) {
-	return (int16)lround(0.0318f * val * val + 0.6858f * val);
+	return (int16)lrint(0.0318f * val * val + 0.6858f * val);
 }
 
 static int16 conv_lfo_filter_depth(float val) {
-	return (int16)(lround(0.0318f * val * val + 0.6858f * val) * 4.0f);
+	return (int16)(lrint(0.0318f * val * val + 0.6858f * val) * 4.0f);
 }
 
 /*! process system exclusive sent from parse_sysex_event_multi(). */
@@ -7264,14 +7257,14 @@ static int apply_controls(void) {
 			continue;
 
 		case RC_JUMP:
-			val = val * midi_time_ratio + 0.5;
+			val = lrint(val * midi_time_ratio);
 			if (play_pause_flag) {
 				midi_restart_time = val;
 				ctl_pause_event(1, val);
 				continue;
 			}
 			aq_flush(1);
-			if (val >= sample_count * midi_time_ratio + 0.5)
+			if (val >= lrint(sample_count * midi_time_ratio))
 				return RC_TUNE_END;
 			skip_to(val);
 			ctl_updatetime(val);
@@ -7279,13 +7272,9 @@ static int apply_controls(void) {
 
 		case RC_FORWARD: /* >> */
 			if (play_pause_flag) {
-				midi_restart_time +=
-				    val * midi_time_ratio + 0.5;
-				if (midi_restart_time >
-				    sample_count * midi_time_ratio + 0.5)
-					midi_restart_time =
-					    sample_count * midi_time_ratio +
-					    0.5;
+				midi_restart_time += lrint(val * midi_time_ratio);
+				if (midi_restart_time > lrint(sample_count * midi_time_ratio))
+					midi_restart_time = lrint(sample_count * midi_time_ratio);
 				ctl_pause_event(1, midi_restart_time);
 				continue;
 			}
@@ -7295,8 +7284,8 @@ static int apply_controls(void) {
 				cur = current_sample;
 			if (val == 0x7fffffff)
 				return RC_TUNE_END;
-			val = val * midi_time_ratio + 0.5;
-			if (val + cur >= sample_count * midi_time_ratio + 0.5)
+			val = lrint(val * midi_time_ratio);
+			if (val + cur >= lrint(sample_count * midi_time_ratio))
 				return RC_TUNE_END;
 			skip_to(val + cur);
 			ctl_updatetime(val + cur);
@@ -7304,8 +7293,7 @@ static int apply_controls(void) {
 
 		case RC_BACK: /* << */
 			if (play_pause_flag) {
-				midi_restart_time -=
-				    val * midi_time_ratio + 0.5;
+				midi_restart_time -= lrint(val * midi_time_ratio);
 				if (midi_restart_time < 0)
 					midi_restart_time = 0;
 				ctl_pause_event(1, midi_restart_time);
@@ -7315,7 +7303,7 @@ static int apply_controls(void) {
 			aq_flush(1);
 			if (cur == -1)
 				cur = current_sample;
-			val = val * midi_time_ratio + 0.5;
+			val = lrint(val * midi_time_ratio);
 			if (cur > val) {
 				skip_to(cur - val);
 				ctl_updatetime(cur - val);
@@ -7359,11 +7347,11 @@ static int apply_controls(void) {
 				r *= SPEED_CHANGE_RATE;
 			sync_restart(0);
 			midi_time_ratio /= r;
-			current_sample = (int32)(current_sample / r + 0.5);
+			current_sample = (int32)(lrint(current_sample / r));
 			trace_offset(current_sample);
 			jump_flag = 1;
 			ctl_mode_event(CTLE_TIME_RATIO, 0,
-			               100 / midi_time_ratio + 0.5, 0);
+			               lrint(100. / midi_time_ratio), 0);
 			continue;
 
 		case RC_SPEEDDOWN:
@@ -7372,11 +7360,11 @@ static int apply_controls(void) {
 				r *= SPEED_CHANGE_RATE;
 			sync_restart(0);
 			midi_time_ratio *= r;
-			current_sample = (int32)(current_sample * r + 0.5);
+			current_sample = (int32)(lrint(current_sample * r));
 			trace_offset(current_sample);
 			jump_flag = 1;
 			ctl_mode_event(CTLE_TIME_RATIO, 0,
-			               100 / midi_time_ratio + 0.5, 0);
+			               lrint(100. / midi_time_ratio), 0);
 			continue;
 
 		case RC_VOICEINCR:
@@ -8517,7 +8505,7 @@ static void update_portamento_controls(int ch) {
 		dc = play_mode->rate * mt;
 		d = (int)(1.0 / (mt * PORTAMENTO_CONTROL_RATIO));
 		d++;
-		channel[ch].porta_control_ratio = (int)(d * dc + 0.5);
+		channel[ch].porta_control_ratio = (int)(lrint(d * dc));
 		channel[ch].porta_dpb = d;
 	}
 }
@@ -8549,7 +8537,7 @@ static void update_legato_controls(int ch) {
 	dc = play_mode->rate * mt;
 	d = (int)(1.0 / (mt * PORTAMENTO_CONTROL_RATIO));
 	d++;
-	channel[ch].porta_control_ratio = (int)(d * dc + 0.5);
+	channel[ch].porta_control_ratio = (int)(lrint(d * dc));
 	channel[ch].porta_dpb = d;
 }
 
@@ -9288,7 +9276,7 @@ static void set_single_note_tuning(int part, int a, int b, int rt) {
 			break;
 		f = 440 * pow(2.0, (st - 69) / 12.0);
 		fst = pow(2.0, (a << 7 | b) / 196608.0);
-		freq_table_tuning[tp][kn] = (int)lround(f * fst * 1000.);
+		freq_table_tuning[tp][kn] = (int)lrint(f * fst * 1000.);
 		if (rt)
 			for (i = 0; i < upper_voices; i++)
 				if (voice[i].status != VOICE_FREE) {
@@ -9372,12 +9360,12 @@ static void set_user_temper_entry(int part, int a, int b) {
 					if (l < 0 || l >= 128)
 						continue;
 					if (!(fh & 0x40)) { /* major */
-						freq_table_user[tp][i][l] = (int)lround(f * ratio[k] * 1000.);
-						freq_table_user[tp][i + 36][l] = (int)lround(f * ratio[k] * sc * 1000.);
+						freq_table_user[tp][i][l] = (int)lrint(f * ratio[k] * 1000.);
+						freq_table_user[tp][i + 36][l] = (int)lrint(f * ratio[k] * sc * 1000.);
 					}
 					if (!(bh & 0x40)) { /* minor */
-						freq_table_user[tp][i + 12][l] = (int)lround(f * ratio[k] * sc * 1000.);
-						freq_table_user[tp][i + 24][l] = (int)lround(f * ratio[k] * 1000.);
+						freq_table_user[tp][i + 12][l] = (int)lrint(f * ratio[k] * sc * 1000.);
+						freq_table_user[tp][i + 24][l] = (int)lrint(f * ratio[k] * 1000.);
 					}
 				}
 			}
@@ -9507,6 +9495,7 @@ static int load_pcm_file_wav() {
 	if (current_file_info->pcm_tf) {
 		ctl->cmsg(CMSG_INFO, VERB_NOISY, "open successed.");
 		read_header_wav(current_file_info->pcm_tf);
+		free(current_file_info->pcm_filename);
 		current_file_info->pcm_filename = filename;
 		current_file_info->pcm_mode = PCM_MODE_WAV;
 		return 0;
@@ -9677,7 +9666,7 @@ int play_midi_file(char *fn) {
 	current_freq_table =
 	    compute_freq_table_index(current_keysig, note_key_offset);
 	ctl_mode_event(CTLE_TEMPO, 0, current_play_tempo, 0);
-	ctl_mode_event(CTLE_TIME_RATIO, 0, lround(100. / midi_time_ratio), 0);
+	ctl_mode_event(CTLE_TIME_RATIO, 0, lrint(100. / midi_time_ratio), 0);
 	for (i = 0; i < MAX_CHANNELS; i++) {
 		ctl_mode_event(CTLE_TEMPER_TYPE, 0, i, channel[i].temper_type);
 		ctl_mode_event(CTLE_MUTE, 0, i, temper_type_mute & 1);

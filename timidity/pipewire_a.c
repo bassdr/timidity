@@ -35,10 +35,10 @@
 #endif /* HAVE_CONFIG_H */
 
 #include <assert.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <sys/eventfd.h>
 
 #include <pipewire/pipewire.h>
@@ -72,19 +72,20 @@ static int detect(void);
 
 #define dpm pipewire_play_mode
 
-PlayMode dpm = {DEFAULT_RATE,
-                PE_F32BIT | PE_SIGNED,
-                PF_PCM_STREAM | PF_CAN_TRACE | PF_BUFF_FRAGM_OPT,
-                -1,
-                {0},
-                "PipeWire",
-                'W',
-                NULL,
-                open_output,
-                close_output,
-                output_data,
-                acntl,
-                detect};
+PlayMode dpm = {
+	DEFAULT_RATE,
+	PE_F32BIT | PE_SIGNED,
+	PF_PCM_STREAM | PF_CAN_TRACE | PF_BUFF_FRAGM_OPT,
+	-1,
+	{0},
+	"PipeWire", 'W',
+	NULL,
+	open_output,
+	close_output,
+	output_data,
+	acntl,
+	detect
+};
 
 /*
  * Ring buffer for bridging push (TiMidity) and pull (PipeWire) models.
@@ -253,7 +254,7 @@ static void on_process(void *userdata) {
 
 	int stride = (int)c->sample_size;
 	int64 n_frames = buf->datas[0].maxsize / c->sample_size;
-	if (pwbuf->requested && (uint64_t)n_frames > pwbuf->requested)
+	if (pwbuf->requested && (uint64)n_frames > pwbuf->requested)
 		n_frames = (int64)pwbuf->requested;
 
 	int64 n_bytes = n_frames * stride;
@@ -279,8 +280,7 @@ static void on_process(void *userdata) {
 		c->underrun_faded = 0;
 		/* save for underrun recovery */
 		if (c->last_chunk && n_bytes <= (int64)c->last_chunk_size) {
-			memcpy(c->last_chunk, dst,
-			       n_bytes > 0 ? (size_t)n_bytes : 0);
+			memcpy(c->last_chunk, dst, n_bytes > 0 ? (size_t)n_bytes : 0);
 			c->last_chunk_valid = 1;
 		}
 	} else if (avail > 0) {
@@ -538,38 +538,41 @@ static int open_output(void) {
 
 		for (;;) {
 			ctx.stream = pw_stream_new_simple(
-			    pw_thread_loop_get_loop(ctx.loop), "TiMidity++",
-			    pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio",
-			                      PW_KEY_MEDIA_CATEGORY, "Playback",
-			                      PW_KEY_MEDIA_ROLE, "Music",
-			                      PW_KEY_NODE_LATENCY, latency_str,
-			                      NULL),
-			    &stream_events, &ctx);
+				pw_thread_loop_get_loop(ctx.loop),
+				"TiMidity++",
+				pw_properties_new(
+					PW_KEY_MEDIA_TYPE, "Audio",
+					PW_KEY_MEDIA_CATEGORY, "Playback",
+					PW_KEY_MEDIA_ROLE, "Music",
+					PW_KEY_NODE_LATENCY, latency_str,
+					NULL),
+				&stream_events, &ctx);
 			if (!ctx.stream)
 				goto retry;
 
 			b = SPA_POD_BUILDER_INIT(pod_buffer,
-			                         sizeof(pod_buffer));
-			params[0] = spa_format_audio_raw_build(
-			    &b, SPA_PARAM_EnumFormat,
-			    &SPA_AUDIO_INFO_RAW_INIT(.format = spa_fmt,
-			                             .channels = ctx.channels,
-			                             .rate = dpm.rate));
+						 sizeof(pod_buffer));
+			params[0] = spa_format_audio_raw_build(&b,
+				SPA_PARAM_EnumFormat,
+				&SPA_AUDIO_INFO_RAW_INIT(
+					.format = spa_fmt,
+					.channels = ctx.channels,
+					.rate = dpm.rate));
 
-			if (pw_stream_connect(ctx.stream, PW_DIRECTION_OUTPUT,
-			                      PW_ID_ANY,
-			                      PW_STREAM_FLAG_AUTOCONNECT |
-			                          PW_STREAM_FLAG_MAP_BUFFERS,
-			                      params, 1) == 0)
+			if (pw_stream_connect(ctx.stream,
+					PW_DIRECTION_OUTPUT, PW_ID_ANY,
+					PW_STREAM_FLAG_AUTOCONNECT |
+					PW_STREAM_FLAG_MAP_BUFFERS,
+					params, 1) == 0)
 				break;
 
 			pw_stream_destroy(ctx.stream);
 			ctx.stream = NULL;
-		retry:
+retry:
 			if (!logged) {
 				ctl->cmsg(CMSG_WARNING, VERB_NORMAL,
-				          "PipeWire: daemon not ready, "
-				          "retrying...");
+					  "PipeWire: daemon not ready, "
+					  "retrying...");
 				logged = 1;
 			}
 			usleep(PW_CONNECT_DELAY_US);
@@ -579,7 +582,7 @@ static int open_output(void) {
 	/* start the loop */
 	if (pw_thread_loop_start(ctx.loop) < 0) {
 		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
-		          "PipeWire: cannot start thread loop");
+			  "PipeWire: cannot start thread loop");
 		pw_stream_destroy(ctx.stream);
 		pw_thread_loop_destroy(ctx.loop);
 		return -1;
@@ -757,22 +760,20 @@ static int acntl(int request, void *arg) {
 			struct timespec ts;
 
 			pthread_mutex_lock(&ctx.lock);
-			while (
-			    __atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE) &&
-			    ringbuf_empty(&ctx.rb) < frag_bytes) {
+			while (__atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE) &&
+			       ringbuf_empty(&ctx.rb) < frag_bytes) {
 				/*
 				 * Use timedwait with a 50ms ceiling so we
 				 * don't hang forever if the audio callback
 				 * stops firing (e.g. PipeWire disconnect).
 				 */
 				clock_gettime(CLOCK_REALTIME, &ts);
-				ts.tv_nsec += 50000000; /* 50ms */
+				ts.tv_nsec += 50000000;  /* 50ms */
 				if (ts.tv_nsec >= 1000000000) {
 					ts.tv_nsec -= 1000000000;
 					ts.tv_sec++;
 				}
-				pthread_cond_timedwait(&ctx.cond, &ctx.lock,
-				                       &ts);
+				pthread_cond_timedwait(&ctx.cond, &ctx.lock, &ts);
 			}
 			pthread_mutex_unlock(&ctx.lock);
 			return __atomic_load_n(&ctx.running, __ATOMIC_ACQUIRE) ? 0 : -1;

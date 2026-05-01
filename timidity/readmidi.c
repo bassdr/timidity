@@ -461,8 +461,8 @@ static char *dumpstring(int type, int64 len, char *label, int allocp,
 
     if(len != tf_read(si, 1, len, tf))
     {
-		reuse_mblock(&tmpbuffer);
-		return NULL;
+	reuse_mblock(&tmpbuffer);
+	return NULL;
     }
     si[len]='\0';
 
@@ -483,9 +483,9 @@ static char *dumpstring(int type, int64 len, char *label, int allocp,
 
     if(allocp)
     {
-		so = safe_strdup(so);
-		reuse_mblock(&tmpbuffer);
-		return so;
+	so = safe_strdup(so);
+	reuse_mblock(&tmpbuffer);
+	return so;
     }
     reuse_mblock(&tmpbuffer);
     return NULL;
@@ -3260,31 +3260,30 @@ static int read_sysex_event(int32 at, int me, int32 len,
     int ne, i;
 
     if(len == 0)
-		return 0;
-
+	return 0;
     if(me != 0xF0)
     {
-		skip(tf, len);
-		return 0;
+	skip(tf, len);
+	return 0;
     }
 
     val = (uint8 *)new_segment(&tmpbuffer, len);
     if(tf_read(val, 1, len, tf) != len)
     {
-		reuse_mblock(&tmpbuffer);
-		return -1;
+	reuse_mblock(&tmpbuffer);
+	return -1;
     }
     if(parse_sysex_event(val, len, &ev))
     {
-		ev.time = at;
-		readmidi_add_event(&ev);
+	ev.time = at;
+	readmidi_add_event(&ev);
     }
     if ((ne = parse_sysex_event_multi(val, len, evm)))
     {
-		for (i = 0; i < ne; i++) {
-			evm[i].time = at;
-			readmidi_add_event(&evm[i]);
-		}
+	for (i = 0; i < ne; i++) {
+	    evm[i].time = at;
+	    readmidi_add_event(&evm[i]);
+	}
     }
     
     reuse_mblock(&tmpbuffer);
@@ -3298,24 +3297,23 @@ static char *fix_string(char *s)
     char c;
 
     if(s == NULL)
-		return NULL;
-
+	return NULL;
     while(*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n')
-		s++;
+	s++;
 
     /* s =~ tr/ \t\r\n/ /s; */
     w = 0;
     for(i = j = 0; (c = s[i]) != '\0'; i++)
     {
-		if(c == '\t' || c == '\r' || c == '\n')
-			c = ' ';
-		if(w)
-			w = (c == ' ');
-		if(!w)
-		{
-			s[j++] = c;
-			w = (c == ' ');
-		}
+	if(c == '\t' || c == '\r' || c == '\n')
+	    c = ' ';
+	if(w)
+	    w = (c == ' ');
+	if(!w)
+	{
+	    s[j++] = c;
+	    w = (c == ' ');
+	}
     }
 
     /* s =~ s/ $//; */
@@ -3463,9 +3461,9 @@ static int read_smf_track(struct timidity_file *tf, int trackno, int rewindp)
     next_pos = tf_tell(tf) + len;
     if(strncmp(tmp, "MTrk", 4))
     {
-		ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
-			"%s: Corrupt MIDI file.", current_filename);
-		return -2;
+	ctl->cmsg(CMSG_ERROR, VERB_NORMAL,
+		  "%s: Corrupt MIDI file.", current_filename);
+	return -2;
     }
 
     lastchan = laststatus = 0;
@@ -3503,7 +3501,7 @@ static int read_smf_track(struct timidity_file *tf, int trackno, int rewindp)
 	{
 	    type = tf_getc(tf);
 	    if((len = getvl(tf)) < 0)
-			return -1;
+		return -1;
 	    if(type > 0 && type < 16)
 	    {
 		static char *label[] =
@@ -4097,7 +4095,7 @@ static MidiEvent *groom_list(int32 divisions, int32 *eventsp, int32 *samplesp)
 	  case ME_RESET:
 	    change_system_mode(meep->event.a);
 	    ctl->cmsg(CMSG_INFO, VERB_NOISY, "MIDI reset at %d sec",
-		      (int)((double)st / play_mode->rate + 0.5));
+		      (int)(lrint((double)st / play_mode->rate)));
 	    for(j = 0; j < MAX_CHANNELS; j++)
 	    {
 		if(play_system_mode == XG_SYSTEM_MODE && j % 16 == 9)
@@ -4673,9 +4671,9 @@ static int32 compute_smf_at_time(const int32 sample, int32 *sample_adj)
 	int i;
 	
 	for (i = 0, e = evlist; i < event_count; i++, e = e->next) {
-		st += (double) tempo * play_mode->rate / 1000000
+		st += lrint((double) tempo * play_mode->rate / 1000000.
 				/ current_file_info->divisions
-				* (e->event.time - prev_time) + 0.5;
+				* (e->event.time - prev_time));
 		if (st >= sample && e->event.type == ME_NOTE_STEP) {
 			*sample_adj = st;
 			return e->event.time;
@@ -4694,9 +4692,9 @@ static int32 compute_smf_at_time2(const Measure m, int32 *sample)
 	int i;
 	
 	for (i = 0, e = evlist; i < event_count; i++, e = e->next) {
-		st += (double) tempo * play_mode->rate / 1000000
+		st += lrint((double) tempo * play_mode->rate / 1000000
 				/ current_file_info->divisions
-				* (e->event.time - prev_time) + 0.5;
+				* (e->event.time - prev_time));
 		if (e->event.type == ME_NOTE_STEP
 				&& ((e->event.a + ((e->event.b & 0x0f) << 8)) * 16
 				+ (e->event.b >> 4)) >= m.meas * 16 + m.beat) {

@@ -24,8 +24,8 @@
 #define ___PLAYMIDI_H_
 
 typedef struct {
-  int32 time;
-  uint8 type, channel, a, b;
+	int32 time;
+	uint8 type, channel, a, b;
 } MidiEvent;
 
 #define REVERB_MAX_DELAY_OUT (4 * play_mode->rate)
@@ -34,15 +34,14 @@ typedef struct {
 			     (((int)(ep)->a + note_key_offset + \
 			       channel[ep->channel].key_shift) & 0x7f))
 
-#define MIDI_EVENT_TIME(ep) ((int32)((ep)->time * midi_time_ratio + 0.5))
+#define MIDI_EVENT_TIME(ep) ((int32)lrint((ep)->time * midi_time_ratio))
 
 #define SYSEX_TAG 0xFF
 
 /* Midi events */
-enum midi_event_t
-{
+enum midi_event_t {
 	ME_NONE,
-	
+
 	/* MIDI events */
 	ME_NOTEOFF,
 	ME_NOTEON,
@@ -50,7 +49,7 @@ enum midi_event_t
 	ME_PROGRAM,
 	ME_CHANNEL_PRESSURE,
 	ME_PITCHWHEEL,
-	
+
 	/* Controls */
 	ME_TONE_BANK_MSB,
 	ME_TONE_BANK_LSB,
@@ -92,125 +91,125 @@ enum midi_event_t
 	ME_ALL_NOTES_OFF,
 	ME_MONO,
 	ME_POLY,
-	
-	/* TiMidity Extensionals */
+
+  /* TiMidity Extensionals */
 #if 0
 	ME_VOLUME_ONOFF,		/* Not supported */
 #endif
-	ME_MASTER_TUNING,		/* Master tuning */
-	ME_SCALE_TUNING,		/* Scale tuning */
-	ME_BULK_TUNING_DUMP,	/* Bulk tuning dump */
-	ME_SINGLE_NOTE_TUNING,	/* Single-note tuning */
+	ME_MASTER_TUNING,      /* Master tuning */
+	ME_SCALE_TUNING,       /* Scale tuning */
+	ME_BULK_TUNING_DUMP,   /* Bulk tuning dump */
+	ME_SINGLE_NOTE_TUNING, /* Single-note tuning */
 	ME_RANDOM_PAN,
-	ME_SET_PATCH,			/* Install special instrument */
+	ME_SET_PATCH, /* Install special instrument */
 	ME_DRUMPART,
 	ME_KEYSHIFT,
-	ME_PATCH_OFFS,			/* Change special instrument sample position
-							 * Channel, LSB, MSB
-							 */
-	
+	ME_PATCH_OFFS, /* Change special instrument sample position
+	                * Channel, LSB, MSB
+	                */
+
 	/* Global channel events */
 	ME_TEMPO,
 	ME_CHORUS_TEXT,
 	ME_LYRIC,
-	ME_GSLCD,				/* GS L.C.D. Exclusive message event */
+	ME_GSLCD, /* GS L.C.D. Exclusive message event */
 	ME_MARKER,
-	ME_INSERT_TEXT,			/* for SC */
+	ME_INSERT_TEXT, /* for SC */
 	ME_TEXT,
-	ME_KARAOKE_LYRIC,		/* for KAR format */
+	ME_KARAOKE_LYRIC, /* for KAR format */
 	ME_MASTER_VOLUME,
-	ME_RESET,				/* Reset and change system mode */
+	ME_RESET, /* Reset and change system mode */
 	ME_NOTE_STEP,
-	ME_CUEPOINT,			/* skip to time segment */
-	
-	ME_TIMESIG,				/* Time signature */
-	ME_KEYSIG,				/* Key signature */
-	ME_TEMPER_KEYSIG,		/* Temperament key signature */
-	ME_TEMPER_TYPE,			/* Temperament type */
-	ME_MASTER_TEMPER_TYPE,	/* Master temperament type */
-	ME_USER_TEMPER_ENTRY,	/* User-defined temperament entry */
-	
-	ME_SYSEX_LSB,			/* Universal system exclusive message (LSB) */
-	ME_SYSEX_MSB,			/* Universal system exclusive message (MSB) */
-	ME_SYSEX_GS_LSB,		/* GS system exclusive message (LSB) */
-	ME_SYSEX_GS_MSB,		/* GS system exclusive message (MSB) */
-	ME_SYSEX_XG_LSB,		/* XG system exclusive message (LSB) */
-	ME_SYSEX_XG_MSB,		/* XG system exclusive message (MSB) */
-	
-	ME_WRD,					/* for MIMPI WRD tracer */
-	ME_SHERRY,				/* for Sherry WRD tracer */
+	ME_CUEPOINT, /* skip to time segment */
+
+	ME_TIMESIG,            /* Time signature */
+	ME_KEYSIG,             /* Key signature */
+	ME_TEMPER_KEYSIG,      /* Temperament key signature */
+	ME_TEMPER_TYPE,        /* Temperament type */
+	ME_MASTER_TEMPER_TYPE, /* Master temperament type */
+	ME_USER_TEMPER_ENTRY,  /* User-defined temperament entry */
+
+	ME_SYSEX_LSB,    /* Universal system exclusive message (LSB) */
+	ME_SYSEX_MSB,    /* Universal system exclusive message (MSB) */
+	ME_SYSEX_GS_LSB, /* GS system exclusive message (LSB) */
+	ME_SYSEX_GS_MSB, /* GS system exclusive message (MSB) */
+	ME_SYSEX_XG_LSB, /* XG system exclusive message (LSB) */
+	ME_SYSEX_XG_MSB, /* XG system exclusive message (MSB) */
+
+	ME_WRD,    /* for MIMPI WRD tracer */
+	ME_SHERRY, /* for Sherry WRD tracer */
 	ME_BARMARKER,
-	ME_STEP,				/* for Metronome */
-	
-	ME_LAST = 254,			/* Last sequence of MIDI list.
-							 * This event is reserved for realtime player.
-							 */
-	ME_EOT = 255			/* End of MIDI.  Finish to play */
+	ME_STEP, /* for Metronome */
+
+	ME_LAST = 254, /* Last sequence of MIDI list.
+	                * This event is reserved for realtime player.
+	                */
+	ME_EOT = 255   /* End of MIDI.  Finish to play */
 };
 
-#define GLOBAL_CHANNEL_EVENT_TYPE(type)	\
+#define GLOBAL_CHANNEL_EVENT_TYPE(type)                                        \
 	((type) == ME_NONE || (type) >= ME_TEMPO)
 
 enum rpn_data_address_t /* NRPN/RPN */
 {
-    NRPN_ADDR_0108,
-    NRPN_ADDR_0109,
-    NRPN_ADDR_010A,
-    NRPN_ADDR_0120,
-    NRPN_ADDR_0121,
+	NRPN_ADDR_0108,
+	NRPN_ADDR_0109,
+	NRPN_ADDR_010A,
+	NRPN_ADDR_0120,
+	NRPN_ADDR_0121,
 	NRPN_ADDR_0130,
 	NRPN_ADDR_0131,
 	NRPN_ADDR_0134,
 	NRPN_ADDR_0135,
-    NRPN_ADDR_0163,
-    NRPN_ADDR_0164,
-    NRPN_ADDR_0166,
-    NRPN_ADDR_1400,
-    NRPN_ADDR_1500,
-    NRPN_ADDR_1600,
-    NRPN_ADDR_1700,
-    NRPN_ADDR_1800,
-    NRPN_ADDR_1900,
-    NRPN_ADDR_1A00,
-    NRPN_ADDR_1C00,
-    NRPN_ADDR_1D00,
-    NRPN_ADDR_1E00,
-    NRPN_ADDR_1F00,
-    NRPN_ADDR_3000,
-    NRPN_ADDR_3100,
-    NRPN_ADDR_3400,
-    NRPN_ADDR_3500,
-    RPN_ADDR_0000,
-    RPN_ADDR_0001,
-    RPN_ADDR_0002,
-    RPN_ADDR_0003,
-    RPN_ADDR_0004,
+	NRPN_ADDR_0163,
+	NRPN_ADDR_0164,
+	NRPN_ADDR_0166,
+	NRPN_ADDR_1400,
+	NRPN_ADDR_1500,
+	NRPN_ADDR_1600,
+	NRPN_ADDR_1700,
+	NRPN_ADDR_1800,
+	NRPN_ADDR_1900,
+	NRPN_ADDR_1A00,
+	NRPN_ADDR_1C00,
+	NRPN_ADDR_1D00,
+	NRPN_ADDR_1E00,
+	NRPN_ADDR_1F00,
+	NRPN_ADDR_3000,
+	NRPN_ADDR_3100,
+	NRPN_ADDR_3400,
+	NRPN_ADDR_3500,
+	RPN_ADDR_0000,
+	RPN_ADDR_0001,
+	RPN_ADDR_0002,
+	RPN_ADDR_0003,
+	RPN_ADDR_0004,
 	RPN_ADDR_0005,
-    RPN_ADDR_7F7F,
-    RPN_ADDR_FFFF,
-    RPN_MAX_DATA_ADDR
+	RPN_ADDR_7F7F,
+	RPN_ADDR_FFFF,
+	RPN_MAX_DATA_ADDR
 };
 
-#define RX_PITCH_BEND (1u<<0)
-#define RX_CH_PRESSURE (1u<<1)
-#define RX_PROGRAM_CHANGE (1u<<2)
-#define RX_CONTROL_CHANGE (1u<<3)
-#define RX_POLY_PRESSURE (1u<<4)
-#define RX_NOTE_MESSAGE (1u<<5)
-#define RX_RPN (1u<<6)
-#define RX_NRPN (1u<<7)
-#define RX_MODULATION (1u<<8)
-#define RX_VOLUME (1u<<9)
-#define RX_PANPOT (1u<<10)
-#define RX_EXPRESSION (1u<<11)
-#define RX_HOLD1 (1u<<12)
-#define RX_PORTAMENTO (1u<<13)
-#define RX_SOSTENUTO (1u<<14)
-#define RX_SOFT (1u<<15)
-#define RX_NOTE_ON (1u<<16)
-#define RX_NOTE_OFF (1u<<17)
-#define RX_BANK_SELECT (1u<<18)
-#define RX_BANK_SELECT_LSB (1u<<19)
+#define RX_PITCH_BEND (1u << 0)
+#define RX_CH_PRESSURE (1u << 1)
+#define RX_PROGRAM_CHANGE (1u << 2)
+#define RX_CONTROL_CHANGE (1u << 3)
+#define RX_POLY_PRESSURE (1u << 4)
+#define RX_NOTE_MESSAGE (1u << 5)
+#define RX_RPN (1u << 6)
+#define RX_NRPN (1u << 7)
+#define RX_MODULATION (1u << 8)
+#define RX_VOLUME (1u << 9)
+#define RX_PANPOT (1u << 10)
+#define RX_EXPRESSION (1u << 11)
+#define RX_HOLD1 (1u << 12)
+#define RX_PORTAMENTO (1u << 13)
+#define RX_SOSTENUTO (1u << 14)
+#define RX_SOFT (1u << 15)
+#define RX_NOTE_ON (1u << 16)
+#define RX_NOTE_OFF (1u << 17)
+#define RX_BANK_SELECT (1u << 18)
+#define RX_BANK_SELECT_LSB (1u << 19)
 
 enum {
 	EG_ATTACK = 0,
@@ -249,133 +248,130 @@ struct part_eq_xg {
 #endif /* PART_EQ_XG */
 
 typedef struct {
-  int16 val;
-  int8 pitch;	/* in +-semitones [-24, 24] */
-  int16 cutoff;	/* in +-cents [-9600, 9600] */
-  float amp;	/* [-1.0, 1.0] */
-  /* in GS, LFO1 means LFO for voice 1, LFO2 means LFO for voice2.
-     LFO2 is not supported. */
-  float lfo1_rate, lfo2_rate;	/* in +-Hz [-10.0, 10.0] */
-  int16 lfo1_pitch_depth, lfo2_pitch_depth;	/* in cents [0, 600] */
-  int16 lfo1_tvf_depth, lfo2_tvf_depth;	/* in cents [0, 2400] */
-  float lfo1_tva_depth, lfo2_tva_depth;	/* [0, 1.0] */
-  int8 variation_control_depth, insertion_control_depth;
+	int16 val;
+	int8 pitch;   /* in +-semitones [-24, 24] */
+	int16 cutoff; /* in +-cents [-9600, 9600] */
+	float amp;    /* [-1.0, 1.0] */
+	/* in GS, LFO1 means LFO for voice 1, LFO2 means LFO for voice2.
+	   LFO2 is not supported. */
+	float lfo1_rate, lfo2_rate;               /* in +-Hz [-10.0, 10.0] */
+	int16 lfo1_pitch_depth, lfo2_pitch_depth; /* in cents [0, 600] */
+	int16 lfo1_tvf_depth, lfo2_tvf_depth;     /* in cents [0, 2400] */
+	float lfo1_tva_depth, lfo2_tva_depth;     /* [0, 1.0] */
+	int8 variation_control_depth, insertion_control_depth;
 } midi_controller;
 
-struct DrumPartEffect
-{
+struct DrumPartEffect {
 	int32 *buf;
 	int8 note, reverb_send, chorus_send, delay_send;
 };
 
-struct DrumParts
-{
-    uint8 drum_panning;
-    int32 drum_envelope_rate[6]; /* drum instrument envelope */
-    int8 pan_random;    /* flag for drum random pan */
+struct DrumParts {
+	uint8 drum_panning;
+	int32 drum_envelope_rate[6]; /* drum instrument envelope */
+	int8 pan_random;             /* flag for drum random pan */
 	float drum_level;
 
-	int8 chorus_level, reverb_level, delay_level, coarse, fine,
-		play_note, drum_cutoff_freq, drum_resonance;
+	int8 chorus_level, reverb_level, delay_level, coarse, fine, play_note,
+	    drum_cutoff_freq, drum_resonance;
 	uint32 rx;
 };
 
 typedef struct {
-  uint8	bank, bank_msb, bank_lsb, program, volume,
-	expression, sustain, panning, mono, portamento,
-	key_shift, loop_timeout;
+	uint8 bank, bank_msb, bank_lsb, program, volume, expression, sustain,
+	    panning, mono, portamento, key_shift, loop_timeout;
 
-  /* chorus, reverb... Coming soon to a 300-MHz, eight-way superscalar
-     processor near you */
-  int8	chorus_level,	/* Chorus level */
-	reverb_level;	/* Reverb level. */
-  int	reverb_id;	/* Reverb ID used for reverb optimize implementation
-			   >=0 reverb_level
-			   -1: DEFAULT_REVERB_SEND_LEVEL
-			   */
-  int8 delay_level;	/* Delay Send Level */
-  int8 eq_gs;	/* EQ ON/OFF (GS) */
-  int8 insertion_effect;
+	/* chorus, reverb... Coming soon to a 300-MHz, eight-way superscalar
+	   processor near you */
+	int8 chorus_level, /* Chorus level */
+	    reverb_level;  /* Reverb level. */
+	int reverb_id;     /* Reverb ID used for reverb optimize implementation
+	                      >=0 reverb_level
+	                      -1: DEFAULT_REVERB_SEND_LEVEL
+	                      */
+	int8 delay_level;  /* Delay Send Level */
+	int8 eq_gs;        /* EQ ON/OFF (GS) */
+	int8 insertion_effect;
 
-  /* Special sample ID. (0 means Normal sample) */
-  uint8 special_sample;
+	/* Special sample ID. (0 means Normal sample) */
+	uint8 special_sample;
 
-  int pitchbend;
+	int pitchbend;
 
-  FLOAT_T
-    pitchfactor; /* precomputed pitch bend factor to save some fdiv's */
+	FLOAT_T
+	pitchfactor; /* precomputed pitch bend factor to save some fdiv's */
 
-  /* For portamento */
-  uint8 portamento_time_msb, portamento_time_lsb;
-  int porta_control_ratio, porta_dpb;
-  int32 last_note_fine;
+	/* For portamento */
+	uint8 portamento_time_msb, portamento_time_lsb;
+	int porta_control_ratio, porta_dpb;
+	int32 last_note_fine;
 
-  /* For Drum part */
-  struct DrumParts *drums[128];
+	/* For Drum part */
+	struct DrumParts *drums[128];
 
-  /* For NRPN Vibrato */
-  int32 vibrato_depth, vibrato_delay;
-  float vibrato_ratio;
+	/* For NRPN Vibrato */
+	int32 vibrato_depth, vibrato_delay;
+	float vibrato_ratio;
 
-  /* For RPN */
-  uint8 rpnmap[RPN_MAX_DATA_ADDR]; /* pseudo RPN address map */
-  uint8 rpnmap_lsb[RPN_MAX_DATA_ADDR];
-  uint8 lastlrpn, lastmrpn;
-  int8  nrpn; /* 0:RPN, 1:NRPN, -1:Undefined */
-  int rpn_7f7f_flag;		/* Boolean flag used for RPN 7F/7F */
+	/* For RPN */
+	uint8 rpnmap[RPN_MAX_DATA_ADDR]; /* pseudo RPN address map */
+	uint8 rpnmap_lsb[RPN_MAX_DATA_ADDR];
+	uint8 lastlrpn, lastmrpn;
+	int8 nrpn;         /* 0:RPN, 1:NRPN, -1:Undefined */
+	int rpn_7f7f_flag; /* Boolean flag used for RPN 7F/7F */
 
-  /* For channel envelope */
-  int32 envelope_rate[6]; /* for Envelope Generator in mix.c
-			   * 0: value for attack rate
-			   * 2: value for decay rate
-			   * 3: value for release rate
-			   */
+	/* For channel envelope */
+	int32 envelope_rate[6]; /* for Envelope Generator in mix.c
+	                         * 0: value for attack rate
+	                         * 2: value for decay rate
+	                         * 3: value for release rate
+	                         */
 
-  int mapID;			/* Program map ID */
-  AlternateAssign *altassign;	/* Alternate assign patch table */
-  int32 lasttime;     /* Last sample time of computed voice on this channel */
+	int mapID;                  /* Program map ID */
+	AlternateAssign *altassign; /* Alternate assign patch table */
+	int32 lasttime; /* Last sample time of computed voice on this channel */
 
-  /* flag for random pan */
-  int pan_random;
+	/* flag for random pan */
+	int pan_random;
 
-  /* for Voice LPF / Resonance */
-  int8 param_resonance, param_cutoff_freq;	/* -64 ~ 63 */
-  float cutoff_freq_coef, resonance_dB;
+	/* for Voice LPF / Resonance */
+	int8 param_resonance, param_cutoff_freq; /* -64 ~ 63 */
+	float cutoff_freq_coef, resonance_dB;
 
-  int8 velocity_sense_depth, velocity_sense_offset;
-  
-  int8 scale_tuning[12], prev_scale_tuning;
-  int8 temper_type;
+	int8 velocity_sense_depth, velocity_sense_offset;
 
-  int8 soft_pedal;
-  int8 sostenuto;
-  int8 damper_mode;
+	int8 scale_tuning[12], prev_scale_tuning;
+	int8 temper_type;
 
-  int8 tone_map0_number;
-  FLOAT_T pitch_offset_fine;	/* in Hz */
-  int8 assign_mode;
+	int8 soft_pedal;
+	int8 sostenuto;
+	int8 damper_mode;
 
-  int8 legato;	/* legato footswitch */
-  int8 legato_flag;	/* note-on flag for legato */
+	int8 tone_map0_number;
+	FLOAT_T pitch_offset_fine; /* in Hz */
+	int8 assign_mode;
 
-  midi_controller mod, bend, caf, paf, cc1, cc2;
+	int8 legato;      /* legato footswitch */
+	int8 legato_flag; /* note-on flag for legato */
 
-  ChannelBitMask channel_layer;
-  int port_select;
+	midi_controller mod, bend, caf, paf, cc1, cc2;
 
-  struct part_eq_xg eq_xg;
+	ChannelBitMask channel_layer;
+	int port_select;
 
-  int8 dry_level;
-  int8 note_limit_high, note_limit_low;	/* Note Limit (Keyboard Range) */
-  int8 vel_limit_high, vel_limit_low;	/* Velocity Limit */
-  uint32 rx;	/* Rx. ~ (Rcv ~) */
+	struct part_eq_xg eq_xg;
 
-  int drum_effect_num;
-  int8 drum_effect_flag;
-  struct DrumPartEffect *drum_effect;
+	int8 dry_level;
+	int8 note_limit_high, note_limit_low; /* Note Limit (Keyboard Range) */
+	int8 vel_limit_high, vel_limit_low;   /* Velocity Limit */
+	uint32 rx;                            /* Rx. ~ (Rcv ~) */
 
-  int8 sysex_gs_msb_addr, sysex_gs_msb_val,
-		sysex_xg_msb_addr, sysex_xg_msb_val, sysex_msb_addr, sysex_msb_val;
+	int drum_effect_num;
+	int8 drum_effect_flag;
+	struct DrumPartEffect *drum_effect;
+
+	int8 sysex_gs_msb_addr, sysex_gs_msb_val, sysex_xg_msb_addr,
+	    sysex_xg_msb_val, sysex_msb_addr, sysex_msb_val;
 } Channel;
 
 /* Causes the instrument's default panning to be used. */
@@ -383,13 +379,13 @@ typedef struct {
 
 typedef struct {
 	int16 freq, last_freq, orig_freq;
-	double reso_dB, last_reso_dB, orig_reso_dB, reso_lin; 
-	int8 type;	/* filter type. 0: Off, 1: 12dB/oct, 2: 24dB/oct */ 
+	double reso_dB, last_reso_dB, orig_reso_dB, reso_lin;
+	int8 type; /* filter type. 0: Off, 1: 12dB/oct, 2: 24dB/oct */
 #ifdef USE_FLOAT_MIXING
 	float f, q, p;
 	float b0, b1, b2, b3, b4;
 #else
-	int32 f, q, p;	/* coefficients in fixed-point */
+	int32 f, q, p; /* coefficients in fixed-point */
 	int32 b0, b1, b2, b3, b4;
 #endif
 	float gain;
@@ -398,80 +394,75 @@ typedef struct {
 
 #define ENABLE_PAN_DELAY
 #ifdef ENABLE_PAN_DELAY
-#define PAN_DELAY_BUF_MAX 48	/* 0.5ms in 96kHz */
-#endif	/* ENABLE_PAN_DELAY */
+#define PAN_DELAY_BUF_MAX 48 /* 0.5ms in 96kHz */
+#endif                       /* ENABLE_PAN_DELAY */
 
 #if SAMPLE_LENGTH_BITS == 32 && TIMIDITY_HAVE_INT64
-typedef int64 spoff_fixed_t;	/* sample offset must be signed */
+typedef int64 spoff_fixed_t; /* sample offset must be signed */
 #else
 typedef splen_t spoff_fixed_t;
 #endif
 
 typedef struct {
-  uint8
-    status, channel, note, velocity;
-  int vid, temper_instant;
-  Sample *sample;
-  spoff_fixed_t sample_offset;
-  int32
-    orig_frequency, frequency, sample_increment,
-    envelope_volume, envelope_target, envelope_increment,
-    tremolo_sweep, tremolo_sweep_position,
-    tremolo_phase, tremolo_phase_increment,
-    vibrato_sweep, vibrato_sweep_position;
+	uint8 status, channel, note, velocity;
+	int vid, temper_instant;
+	Sample *sample;
+	spoff_fixed_t sample_offset;
+	int32 orig_frequency, frequency, sample_increment, envelope_volume,
+	    envelope_target, envelope_increment, tremolo_sweep,
+	    tremolo_sweep_position, tremolo_phase, tremolo_phase_increment,
+	    vibrato_sweep, vibrato_sweep_position;
 
-  final_volume_t left_mix, right_mix;
+	final_volume_t left_mix, right_mix;
 #ifdef SMOOTH_MIXING
-  int32 old_left_mix, old_right_mix,
-     left_mix_offset, right_mix_offset,
-     left_mix_inc, right_mix_inc;
+	int32 old_left_mix, old_right_mix, left_mix_offset, right_mix_offset,
+	    left_mix_inc, right_mix_inc;
 #endif
 
-  FLOAT_T
-    left_amp, right_amp, tremolo_volume;
-  int32
-    vibrato_sample_increment[VIBRATO_SAMPLE_INCREMENTS], vibrato_delay;
-  int
-	vibrato_phase, orig_vibrato_control_ratio, vibrato_control_ratio,
-    vibrato_depth, vibrato_control_counter,
-    envelope_stage, control_counter, panning, panned;
-  int16 tremolo_depth;
+	FLOAT_T
+	left_amp, right_amp, tremolo_volume;
+	int32 vibrato_sample_increment[VIBRATO_SAMPLE_INCREMENTS],
+	    vibrato_delay;
+	int vibrato_phase, orig_vibrato_control_ratio, vibrato_control_ratio,
+	    vibrato_depth, vibrato_control_counter, envelope_stage,
+	    control_counter, panning, panned;
+	int16 tremolo_depth;
 
-  /* for portamento */
-  int porta_control_ratio, porta_control_counter, porta_dpb;
-  int32 porta_pb;
+	/* for portamento */
+	int porta_control_ratio, porta_control_counter, porta_dpb;
+	int32 porta_pb;
 
-  int delay; /* Note ON delay samples */
-  int32 timeout;
-  struct cache_hash *cache;
+	int delay; /* Note ON delay samples */
+	int32 timeout;
+	struct cache_hash *cache;
 
-  uint8 chorus_link;	/* Chorus link */
-  int8 proximate_flag;
+	uint8 chorus_link; /* Chorus link */
+	int8 proximate_flag;
 
-  FilterCoefficients fc;
+	FilterCoefficients fc;
 
-  FLOAT_T envelope_scale, last_envelope_volume;
-  int32 inv_envelope_scale;
+	FLOAT_T envelope_scale, last_envelope_volume;
+	int32 inv_envelope_scale;
 
-  int modenv_stage;
-  int32
-    modenv_volume, modenv_target, modenv_increment;
-  FLOAT_T last_modenv_volume;
-  int32 tremolo_delay, modenv_delay;
+	int modenv_stage;
+	int32 modenv_volume, modenv_target, modenv_increment;
+	FLOAT_T last_modenv_volume;
+	int32 tremolo_delay, modenv_delay;
 
-  int32 delay_counter;
+	int32 delay_counter;
 
 #ifdef ENABLE_PAN_DELAY
-  int32 pan_delay_buf[PAN_DELAY_BUF_MAX], pan_delay_rpt, pan_delay_wpt, pan_delay_spt;
-#endif	/* ENABLE_PAN_DELAY */
+	int32 pan_delay_buf[PAN_DELAY_BUF_MAX], pan_delay_rpt, pan_delay_wpt,
+	    pan_delay_spt;
+#endif /* ENABLE_PAN_DELAY */
 } Voice;
 
 /* Voice status options: */
-#define VOICE_FREE	(1<<0)
-#define VOICE_ON	(1<<1)
-#define VOICE_SUSTAINED	(1<<2)
-#define VOICE_OFF	(1<<3)
-#define VOICE_DIE	(1<<4)
+#define VOICE_FREE (1 << 0)
+#define VOICE_ON (1 << 1)
+#define VOICE_SUSTAINED (1 << 2)
+#define VOICE_OFF (1 << 3)
+#define VOICE_DIE (1 << 4)
 
 /* Voice panned options: */
 #define PANNED_MYSTERY 0
@@ -480,7 +471,7 @@ typedef struct {
 #define PANNED_CENTER 3
 /* Anything but PANNED_MYSTERY only uses the left volume */
 
-#define ISDRUMCHANNEL(c)  IS_SET_CHANNELMASK(drumchannels, c)
+#define ISDRUMCHANNEL(c) IS_SET_CHANNELMASK(drumchannels, c)
 
 extern Channel channel[];
 extern Voice *voice;
@@ -509,18 +500,16 @@ enum {
 	MODULE_TIMIDITY_DEBUG = 0x7f,
 };
 
-static inline int get_module(void) {return opt_default_module;}
+static inline int get_module(void) { return opt_default_module; }
 
-static inline int is_gs_module(void)
-{
+static inline int is_gs_module(void) {
 	int module = get_module();
-    return (module >= MODULE_SC55 && module <= MODULE_MU100);
+	return (module >= MODULE_SC55 && module <= MODULE_MU100);
 }
 
-static inline int is_xg_module(void)
-{
+static inline int is_xg_module(void) {
 	int module = get_module();
-    return (module >= MODULE_MU50 && module <= MODULE_MU100);
+	return (module >= MODULE_MU50 && module <= MODULE_MU100);
 }
 
 extern int32 control_ratio, amp_with_poly, amplification;
@@ -581,8 +570,8 @@ extern int opt_pure_intonation;
 extern int current_freq_table;
 extern int32 opt_drum_power;
 extern int opt_amp_compensation;
-extern int opt_realtime_priority;	/* playmidi.c */
-extern int opt_sequencer_ports;		/* interface/alsaseq_c.c */
+extern int opt_realtime_priority; /* playmidi.c */
+extern int opt_sequencer_ports;   /* interface/alsaseq_c.c */
 extern int opt_user_volume_curve;
 extern int opt_pan_delay;
 
@@ -594,7 +583,8 @@ extern void kill_all_voices(void);
 extern void recompute_freq(int v);
 extern int midi_drumpart_change(int ch, int isdrum);
 extern void ctl_note_event(int noteID);
-extern void ctl_mode_event(int type, int trace, ptr_size_t arg1, ptr_size_t arg2);
+extern void ctl_mode_event(int type, int trace, ptr_size_t arg1,
+                           ptr_size_t arg2);
 extern char *channel_instrum_name(int ch);
 extern int get_reverb_level(int ch);
 extern int get_chorus_level(int ch);
@@ -605,7 +595,7 @@ extern void free_voice(int v);
 extern void pregrow_playmidi_pool(void);
 extern void init_reverb_buffer(void);
 extern void free_reverb_buffer(void);
-extern void play_midi_setup_drums(int ch,int note);
+extern void play_midi_setup_drums(int ch, int note);
 
 /* For stream player */
 extern void playmidi_stream_init(void);
@@ -615,11 +605,11 @@ extern int play_event(MidiEvent *ev);
 
 extern void recompute_voice_filter(int);
 extern FLOAT_T get_note_freq(Sample *, uint8);
-extern FLOAT_T get_note_freq_sf(int16 scale_freq, int16 scale_factor, uint8 note);
+extern FLOAT_T get_note_freq_sf(int16 scale_freq, int16 scale_factor,
+                                uint8 note);
 
 extern void free_drum_effect(int);
 
-extern int compute_freq_table_index(int current_keysig,
-                                    int note_key_offset);
+extern int compute_freq_table_index(int current_keysig, int note_key_offset);
 
 #endif /* ___PLAYMIDI_H_ */

@@ -113,7 +113,7 @@ struct cache_hash *resamp_cache_fetch(Sample *sp, int note)
 	
 	if (sp->vibrato_control_ratio || (sp->modes & MODES_PINGPONG)
 			|| (sp->sample_rate == play_mode->rate
-			&& llround(sp->root_freq) == llround(get_note_freq(sp, sp->note_to_use))))
+			&& llrint(sp->root_freq) == llrint(get_note_freq(sp, sp->note_to_use))))
 		return NULL;
 	addr = sp_hash(sp, note) % HASH_TABLE_SIZE;
 	p = cache_hash_table[addr];
@@ -135,8 +135,8 @@ void resamp_cache_refer_on(Voice *vp, int32 sample_start)
 			|| (vp->sample->modes & MODES_PINGPONG)
 			|| vp->orig_frequency != vp->frequency
 			|| (vp->sample->sample_rate == play_mode->rate
-			&& llround(vp->sample->root_freq)
-			== llround(get_note_freq(vp->sample, vp->sample->note_to_use))))
+			&& llrint(vp->sample->root_freq)
+			== llrint(get_note_freq(vp->sample, vp->sample->note_to_use))))
 		return;
 	note = vp->note;
 	if (channel_note_table[ch].cache[note])
@@ -170,7 +170,7 @@ void resamp_cache_refer_off(int ch, int note, int32 sample_end)
 		return;
 	sp = p->sp;
 	if (sp->sample_rate == play_mode->rate
-			&& llround(sp->root_freq) == llround(get_note_freq(sp, sp->note_to_use)))
+			&& llrint(sp->root_freq) == llrint(get_note_freq(sp, sp->note_to_use)))
 		return;
 	sample_start = channel_note_table[ch].on[note];
 	len = sample_end - sample_start;
@@ -302,24 +302,24 @@ static double sample_resamp_info(Sample *sp, int note,
 		*data_length = 0;
 		return 0.0;
 	}
-	newlen = (splen_t) (TIM_FSCALENEG(xn, FRACTION_BITS) + 0.5);
+	newlen = (splen_t)llrint(TIM_FSCALENEG(xn, FRACTION_BITS));
 	ls = sp->loop_start;
 	le = sp->loop_end;
 	ll = le - ls;
-	xxls = ls / a + 0.5;
-	if (xxls >= SPLEN_T_MAX) {
+	xxls = ls / a;
+	if (xxls + 0.5 >= SPLEN_T_MAX) {
 		/* Ignore this sample */
 		*data_length = 0;
 		return 0.0;
 	}
-	xls = (splen_t) xxls;
-	xxle = le / a + 0.5;
-	if (xxle >= SPLEN_T_MAX) {
+	xls = (splen_t)llrint(xxls);
+	xxle = le / a;
+	if (xxle + 0.5 >= SPLEN_T_MAX) {
 		/* Ignore this sample */
 		*data_length = 0;
 		return 0.0;
 	}
-	xle = (splen_t) xxle;
+	xle = (splen_t)llrint(xxle);
 	if ((sp->modes & MODES_LOOPING)
 			&& ((xle - xls) >> FRACTION_BITS) < MIN_LOOPLEN) {
 		splen_t n;
@@ -335,13 +335,13 @@ static double sample_resamp_info(Sample *sp, int note,
 		}
 		n = (splen_t) (0.0001 + MIN_LOOPLEN
 				/ TIM_FSCALENEG(xl, FRACTION_BITS)) + 1;
-		xnewxle = le / a + n * xl + 0.5;
-		if (xnewxle >= SPLEN_T_MAX) {
+		xnewxle = le / a + n * xl;
+		if (xnewxle + 0.5 >= SPLEN_T_MAX) {
 			/* Ignore this sample */
 			*data_length = 0;
 			return 0.0;
 		}
-		newxle = (splen_t) xnewxle;
+		newxle = (splen_t)llrint(xnewxle);
 		newlen += (newxle - xle) >> FRACTION_BITS;
 		xle = newxle;
 	}
@@ -423,7 +423,7 @@ static int cache_resampling(struct cache_hash *p)
 	memcpy(newsp, sp, sizeof(Sample));
 	newsp->data = dest;
 	ofs = 0;
-	incr = (splen_t) (TIM_FSCALE(a, FRACTION_BITS) + 0.5);
+	incr = (splen_t)llrint(TIM_FSCALE(a, FRACTION_BITS));
 	if (sp->modes & MODES_LOOPING)
 		for (i = 0; i < newlen; i++) {
 			if (ofs >= le)

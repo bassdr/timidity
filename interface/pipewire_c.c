@@ -998,9 +998,14 @@ static void doit(void)
 		if (pwctx.file_output && pwctx.active) {
 			struct timespec now;
 			clock_gettime(CLOCK_MONOTONIC, &now);
-			int64 elapsed_us = ((int64)now.tv_sec - (int64)pwctx.start_ts.tv_sec) * 1000000LL + 
-				((int64)now.tv_nsec - (int64)pwctx.start_ts.tv_nsec) / 1000LL;
-			int64 audio_us = (int64)pwctx.buffer_time_offset * 1000000LL / play_mode->rate;
+			int64 sec  = now.tv_sec - pwctx.start_ts.tv_sec;
+			int64 nsec = now.tv_nsec - pwctx.start_ts.tv_nsec;
+			if (nsec < 0) {
+				sec--;
+				nsec += 1000000000LL;
+			}
+			int64 elapsed_us = sec * 1000000LL + nsec / 1000LL;
+			int64 audio_us = ((int64)pwctx.buffer_time_offset * 1000000LL) / play_mode->rate;
 			int64 ahead_us = audio_us - elapsed_us;
 			if (ahead_us > 100) {
 				usleep(ahead_us > 50000 ? 50000 : (int)ahead_us);

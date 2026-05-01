@@ -50,7 +50,7 @@ void init_freq_table(void)
 	int i;
 	
 	for (i = 0; i < 128; i++) {
-		freq_table[i] = 440 * pow(2.0, (i - 69) / 12.0) * 1000 + 0.5;
+		freq_table[i] = lrint(440. * pow(2.0, (i - 69) / 12.0) * 1000.);
 		freq_table_zapped[i] = freq_table[i];
 	}
 }
@@ -65,7 +65,7 @@ void init_freq_table_tuning(void)
 	for (i = 0; i < 128; i++) {
 		f = 440 * pow(2.0, (i - 69) / 12.0);
 		for (p = 1; p < 128; p++)
-			freq_table_tuning[p][i] = f * 1000 + 0.5;
+			freq_table_tuning[p][i] = lrint(f * 1000.);
 	}
 }
 
@@ -91,8 +91,8 @@ void init_freq_table_pytha(void)
 				l = i + j * 12 + k;
 				if (l < 0 || l >= 128)
 					continue;
-				freq_table_pytha[i][l] = f * major_ratio[k] * 1000 + 0.5;
-				freq_table_pytha[i + 12][l] = f * minor_ratio[k] * 1000 + 0.5;
+				freq_table_pytha[i][l] = lrint(f * major_ratio[k] * 1000.);
+				freq_table_pytha[i + 12][l] = lrint(f * minor_ratio[k] * 1000.);
 			}
 		}
 }
@@ -135,14 +135,10 @@ void init_freq_table_meantone(void)
 				l = i + j * 12 + k;
 				if (l < 0 || l >= 128)
 					continue;
-				freq_table_meantone[i][l] =
-						f * major_ratio[k] * 1000 + 0.5;
-				freq_table_meantone[i + 12][l] =
-						f * minor_ratio[k] * sc * 1000 + 0.5;
-				freq_table_meantone[i + 24][l] =
-						f * minor_ratio[k] * 1000 + 0.5;
-				freq_table_meantone[i + 36][l] =
-						f * major_ratio[k] * sc * 1000 + 0.5;
+				freq_table_meantone[i][l] = lrint(f * major_ratio[k] * 1000.);
+				freq_table_meantone[i + 12][l] = lrint(f * minor_ratio[k] * sc * 1000.);
+				freq_table_meantone[i + 24][l] = lrint(f * minor_ratio[k] * 1000.);
+				freq_table_meantone[i + 36][l] = lrint(f * major_ratio[k] * sc * 1000.);
 			}
 		}
 }
@@ -168,14 +164,10 @@ void init_freq_table_pureint(void)
 				l = i + j * 12 + k;
 				if (l < 0 || l >= 128)
 					continue;
-				freq_table_pureint[i][l] =
-						f * major_ratio[k] * 1000 + 0.5;
-				freq_table_pureint[i + 12][l] =
-						f * minor_ratio[k] * sc * 1000 + 0.5;
-				freq_table_pureint[i + 24][l] =
-						f * minor_ratio[k] * 1000 + 0.5;
-				freq_table_pureint[i + 36][l] =
-						f * major_ratio[k] * sc * 1000 + 0.5;
+				freq_table_pureint[i][l] = lrint(f * major_ratio[k] * 1000.);
+				freq_table_pureint[i + 12][l] = lrint(f * minor_ratio[k] * sc * 1000.);
+				freq_table_pureint[i + 24][l] = lrint(f * minor_ratio[k] * 1000.);
+				freq_table_pureint[i + 36][l] = lrint(f * major_ratio[k] * sc * 1000.);
 			}
 		}
 }
@@ -193,10 +185,10 @@ void init_freq_table_user(void)
 					l = i + j * 12 + k;
 					if (l < 0 || l >= 128)
 						continue;
-					freq_table_user[p][i][l] = f * 1000 + 0.5;
-					freq_table_user[p][i + 12][l] = f * 1000 + 0.5;
-					freq_table_user[p][i + 24][l] = f * 1000 + 0.5;
-					freq_table_user[p][i + 36][l] = f * 1000 + 0.5;
+					freq_table_user[p][i][l] = lrint(f * 1000.);
+					freq_table_user[p][i + 12][l] = lrint(f * 1000.);
+					freq_table_user[p][i + 24][l] = lrint(f * 1000.);
+					freq_table_user[p][i + 36][l] = lrint(f * 1000.);
 				}
 			}
 }

@@ -1,5 +1,3 @@
-#pragma once
-
 /*
     TiMidity++ -- MIDI to WAVE converter and player
     Copyright (C) 1999-2002 Masanao Izumo <mo@goice.co.jp>
@@ -25,8 +23,6 @@
 
 #ifndef ___INSTRUM_H_
 #define ___INSTRUM_H_
-
-#include "timidity.h"
 
 typedef struct _Sample {
   splen_t
